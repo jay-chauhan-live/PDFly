@@ -1,4 +1,4 @@
-# Inkwell
+# PDFly
 
 Self-hosted, multi-tenant HTML-to-PDF service. See [docs/PLAN.md](docs/PLAN.md) for
 the full design; this README covers getting it running.
@@ -47,12 +47,12 @@ curl -s localhost:3001/health | jq
 # {"status":"ok","info":{"postgres":{"status":"up"},"redis":{"status":"up"}}, ...}
 ```
 
-| Service       | URL                                            |
-| ------------- | ---------------------------------------------- |
-| web           | http://localhost:3000                          |
-| api           | http://localhost:3001 (routes under `/v1`)     |
-| api health    | http://localhost:3001/health                   |
-| MinIO console | http://localhost:9001 (`inkwell` / see `.env`) |
+| Service       | URL                                          |
+| ------------- | -------------------------------------------- |
+| web           | http://localhost:3000                        |
+| api           | http://localhost:3001 (routes under `/v1`)   |
+| api health    | http://localhost:3001/health                 |
+| MinIO console | http://localhost:9001 (`pdfly` / see `.env`) |
 
 ## Checks
 

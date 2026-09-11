@@ -6,8 +6,8 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: {
-    default: 'Inkwell',
-    template: '%s · Inkwell',
+    default: 'PDFly',
+    template: '%s · PDFly',
   },
   description: 'HTML to PDF, with password protection and watermarking.',
 };

@@ -1,4 +1,4 @@
-// Inkwell data model — see docs/PLAN.md §4.
+// PDFly data model — see docs/PLAN.md §4.
 //
 // Multi-tenant: every tenant-owned row carries `orgId`, and every query path
 // is expected to filter on it. Nothing is global except the enums.

@@ -10,7 +10,7 @@ export default function HomePage() {
     <div className="mx-auto flex min-h-dvh max-w-3xl flex-col gap-10 px-6 py-16">
       <header className="flex items-start justify-between gap-4">
         <div className="space-y-2">
-          <h1 className="text-3xl font-semibold tracking-tight">Inkwell</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">PDFly</h1>
           <p className="text-muted-foreground text-sm">
             HTML to PDF, with password protection and watermarking.
           </p>

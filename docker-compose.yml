@@ -1,17 +1,17 @@
-# Local development infrastructure for Inkwell.
+# Local development infrastructure for PDFly.
 # Application services (api, web, renderer, worker) run on the host via
 # `pnpm dev` in Phase 0; only backing services live here.
 
-name: inkwell
+name: pdfly
 
 services:
   postgres:
     image: postgres:18-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-inkwell}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-inkwell}
-      POSTGRES_DB: ${POSTGRES_DB:-inkwell}
+      POSTGRES_USER: ${POSTGRES_USER:-pdfly}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pdfly}
+      POSTGRES_DB: ${POSTGRES_DB:-pdfly}
     ports:
       - '${POSTGRES_PORT:-5432}:5432'
     volumes:
@@ -19,7 +19,7 @@ services:
       # place the cluster in a major-version subdirectory beneath it.
       - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-inkwell} -d ${POSTGRES_DB:-inkwell}']
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-pdfly} -d ${POSTGRES_DB:-pdfly}']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -45,8 +45,8 @@ services:
     restart: unless-stopped
     command: ['server', '/data', '--console-address', ':9001']
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-inkwell}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-inkwell-dev-secret}
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-pdfly}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-pdfly-dev-secret}
     ports:
       - '9000:9000'
       - '${MINIO_CONSOLE_PORT:-9001}:9001'
@@ -65,9 +65,9 @@ services:
       minio:
         condition: service_healthy
     environment:
-      S3_BUCKET: ${S3_BUCKET:-inkwell}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-inkwell}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-inkwell-dev-secret}
+      S3_BUCKET: ${S3_BUCKET:-pdfly}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-pdfly}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-pdfly-dev-secret}
     entrypoint: >
       /bin/sh -c "
       mc alias set local http://minio:9000 \"$$S3_ACCESS_KEY_ID\" \"$$S3_SECRET_ACCESS_KEY\" &&
