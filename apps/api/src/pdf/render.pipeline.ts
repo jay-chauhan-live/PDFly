@@ -18,6 +18,21 @@ export interface RenderOutcome {
   filename: string;
 }
 
+export interface PreviewOutcome {
+  pdf: Buffer;
+  pageCount: number;
+  byteSize: number;
+  durationMs: number;
+}
+
+/** Who a render belongs to, and how it arrived. */
+export interface RenderAttribution {
+  orgId: string;
+  /** Absent for an API token: a valid credential with no person behind it. */
+  userId?: string;
+  source: 'api' | 'ui';
+}
+
 /**
  * Render → store → record, as one unit.
  *
@@ -39,16 +54,41 @@ export class RenderPipeline {
     private readonly config: ConfigService<Env, true>,
   ) {}
 
-  async run(orgId: string, dto: RenderPdfDto, source: 'api' | 'ui'): Promise<RenderOutcome> {
+  /**
+   * Renders without recording or storing anything.
+   *
+   * The playground re-renders on a debounce as someone types (PLAN §9). Each
+   * of those keystroke renders is a draft, not a document: persisting them
+   * would bury the real history and fill object storage with drafts nobody
+   * asked to keep. Skipping the upload also makes the preview noticeably
+   * quicker, which is the whole point of a live pane.
+   */
+  async preview(dto: RenderPdfDto): Promise<PreviewOutcome> {
+    this.assertWithinSizeLimit(dto.html);
+
+    const startedAt = Date.now();
+    const rendered = await this.renderer.render({ html: dto.html, ...(dto.options ?? {}) });
+
+    return {
+      pdf: rendered.pdf,
+      pageCount: await this.countPages(rendered.pdf),
+      byteSize: rendered.pdf.byteLength,
+      durationMs: Date.now() - startedAt,
+    };
+  }
+
+  async run(dto: RenderPdfDto, by: RenderAttribution): Promise<RenderOutcome> {
     this.assertWithinSizeLimit(dto.html);
 
     const startedAt = Date.now();
     const options = dto.options ?? {};
+    const { orgId } = by;
 
     const document = await this.prisma.document.create({
       data: {
         orgId,
-        source,
+        createdBy: by.userId ?? null,
+        source: by.source,
         status: 'rendering',
         title: dto.title ?? null,
         // Passwords are stripped before anything is persisted (PLAN §3, §4).

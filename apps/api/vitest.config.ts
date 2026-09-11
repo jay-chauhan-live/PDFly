@@ -6,6 +6,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.spec.ts', 'test/**/*.spec.ts'],
+    setupFiles: ['./test/setup.ts'],
     root: './',
   },
   // esbuild (Vitest's default transform) cannot emit decorator metadata,

@@ -13,8 +13,8 @@ import { cn } from '@/lib/utils';
 /** PLAN §9. Routes not yet built are marked and rendered as disabled. */
 const NAV = [
   { href: '/', label: 'Overview', Icon: LayoutDashboard, ready: true },
-  { href: '/playground', label: 'Playground', Icon: PlayCircle, ready: false },
-  { href: '/documents', label: 'Documents', Icon: FileText, ready: false },
+  { href: '/playground', label: 'Playground', Icon: PlayCircle, ready: true },
+  { href: '/documents', label: 'Documents', Icon: FileText, ready: true },
   { href: '/settings/tokens', label: 'Settings', Icon: Settings, ready: false },
   { href: '/profile', label: 'Profile', Icon: User, ready: true },
 ] as const;
@@ -67,7 +67,10 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         <nav aria-label="Main" className="mx-auto w-full max-w-6xl px-6">
           <ul className="flex gap-1 overflow-x-auto">
             {NAV.map(({ href, label, Icon, ready }) => {
-              const active = pathname === href;
+              const active =
+                href === '/'
+                  ? pathname === '/'
+                  : pathname === href || pathname.startsWith(`${href}/`);
 
               return (
                 <li key={href}>

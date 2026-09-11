@@ -1,9 +1,9 @@
-import { Body, Controller, Post, Res } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { CurrentContext } from '../auth/current-context.decorator.js';
 import { StorageService } from '../storage/storage.service.js';
 import { RenderPdfDto } from './dto/render-pdf.dto.js';
-import { RenderPipeline } from './render.pipeline.js';
+import { RenderPipeline, type RenderAttribution } from './render.pipeline.js';
 import type { RequestContext } from '../auth/request-context.js';
 
 @Controller('pdf')
@@ -23,7 +23,7 @@ export class PdfController {
     @CurrentContext() ctx: RequestContext,
     @Res() response: Response,
   ): Promise<void> {
-    const result = await this.pipeline.run(ctx.orgId, dto, 'api');
+    const result = await this.pipeline.run(dto, attributionFor(ctx));
     const output = dto.output ?? 'url';
 
     if (output === 'binary') {
@@ -54,4 +54,34 @@ export class PdfController {
       url: await this.storage.signedDownloadUrl(result.storageKey, result.filename),
     });
   }
+
+  /**
+   * The playground's live pane (PLAN §9): the same render, but nothing is
+   * recorded or stored. 200 rather than 201 — a preview creates no resource.
+   */
+  @Post('preview')
+  @HttpCode(200)
+  async preview(@Body() dto: RenderPdfDto, @Res() response: Response): Promise<void> {
+    const result = await this.pipeline.preview(dto);
+
+    response
+      .status(200)
+      .type('application/pdf')
+      .setHeader('content-disposition', 'inline; filename="preview.pdf"')
+      .setHeader('x-page-count', String(result.pageCount))
+      .setHeader('x-duration-ms', String(result.durationMs))
+      .send(result.pdf);
+  }
+}
+
+/**
+ * A dashboard session carries a user; an API token does not. That is the only
+ * honest signal for `source`, and it cannot be spoofed by the request body.
+ */
+function attributionFor(ctx: RequestContext): RenderAttribution {
+  return {
+    orgId: ctx.orgId,
+    ...(ctx.userId ? { userId: ctx.userId } : {}),
+    source: ctx.userId ? 'ui' : 'api',
+  };
 }

@@ -3,17 +3,18 @@
 Self-hosted, multi-tenant HTML-to-PDF service. See [docs/PLAN.md](docs/PLAN.md) for
 the full design; this README covers getting it running.
 
-**Status: Phase 2 (auth and dashboard shell) complete.** HTML in, PDF out, stored
-and recorded, behind real accounts: registration, login, rotating refresh tokens,
-a protected dashboard shell and a profile page. No watermarking or encryption yet,
-and no email — verification and password reset wait for SMTP in Phase 6.
+**Status: Phase 3 (playground and history) complete.** A working product: write
+HTML in a Monaco editor, watch the PDF render live, copy the equivalent API call,
+save a render, then search, filter, download and delete it from the documents
+list. No watermarking or encryption yet, and no email — verification and password
+reset wait for SMTP in Phase 6.
 
 ## Layout
 
 ```
-apps/api      NestJS — config, logging, health, Prisma, auth, POST /v1/pdf.
+apps/api      NestJS — config, logging, health, Prisma, auth, rendering, documents.
 apps/renderer Isolated Playwright/Chromium pool. HTML in, raw PDF out. No DB access.
-apps/web      Next.js dashboard — shadcn/ui, auth, theme switching.
+apps/web      Next.js dashboard — shadcn/ui, auth, playground, document history.
 packages/    Shared code (empty until there is something genuinely shared).
 docs/PLAN.md The build plan.
 ```
@@ -81,6 +82,23 @@ curl -s localhost:3001/v1/pdf \
   -d '{"html":"<h1>Hello</h1>"}' | jq
 ```
 
+Which credential arrived decides how the render is recorded: a dashboard session
+has a user behind it, so the document is attributed to them and marked `ui`; an
+API token has nobody, so it is marked `api`.
+
+## Endpoints so far
+
+```
+POST   /v1/pdf                 render, store, record. url | binary | base64
+POST   /v1/pdf/preview         render and return; records and stores nothing
+GET    /v1/documents           list — search, status, source, date, keyset paging
+GET    /v1/documents/:id       metadata and the options it was rendered with
+GET    /v1/documents/:id/file  short-lived signed download URL
+DELETE /v1/documents/:id       removes the row and the stored object
+POST   /v1/auth/{register,login,refresh,logout}   GET /v1/auth/me
+PATCH  /v1/users/me            POST /v1/users/me/password
+```
+
 `/health` is deliberately unauthenticated — a load balancer has no credential to
 present.
 
@@ -134,3 +152,20 @@ hand-written fake cannot reproduce.
 - **Route protection in the dashboard is UX, not security.** The refresh cookie
   is scoped to the api's `/v1/auth` path, so Next's server never sees it and
   middleware could not read it. Every endpoint enforces auth itself.
+- **Playground previews are deliberately not documents.** The editor re-renders
+  on a debounce as you type; persisting each of those would bury the real
+  history and fill object storage with drafts. `POST /v1/pdf/preview` renders
+  and returns, and skipping the upload is what makes the live pane quick.
+- **The submitted HTML is never stored** — only the options it was rendered
+  with (PLAN §4). "Open settings in playground" carries those across; it cannot
+  bring the markup back.
+- **Document search is a trigram index, not full text.** Titles are short and
+  the box searches as you type, so "inv" must match "invoice-001" — a substring
+  match that `to_tsvector` cannot serve. See the third migration.
+- **Listing uses keyset pagination**, not offsets: renders arrive at the top of
+  the list constantly, and an offset would skip or repeat rows as they do.
+- **Monaco is bundled, not fetched from a CDN.** `@monaco-editor/react` defaults
+  to jsDelivr; pointing it at the npm package keeps the dashboard working
+  offline and its version pinned to the lockfile. The worker entry points need
+  the one-line shims in `components/playground/` because a bare specifier
+  inside `new URL(...)` is not something the bundler can follow.

@@ -6,6 +6,7 @@ import { validateEnv, type Env } from './config/env.schema.js';
 import { APP_GUARD } from '@nestjs/core';
 import { AuthGuard } from './auth/auth.guard.js';
 import { AuthModule } from './auth/auth.module.js';
+import { DocumentsModule } from './documents/documents.module.js';
 import { HealthModule } from './health/health.module.js';
 import { PdfModule } from './pdf/pdf.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
@@ -38,6 +39,7 @@ import { StorageModule } from './storage/storage.module.js';
     RendererModule,
     HealthModule,
     PdfModule,
+    DocumentsModule,
   ],
   // Authentication is on by default; routes opt out with @Public() (PLAN §5).
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],

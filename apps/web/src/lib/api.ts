@@ -116,6 +116,27 @@ async function exchangeRefreshCookie(): Promise<Session | null> {
  * than one would loop when the session is genuinely gone.
  */
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await authedFetch(path, init);
+
+  if (!response.ok) throw await toError(response);
+  if (response.status === 204) return undefined as T;
+
+  return (await response.json()) as T;
+}
+
+/** The same request, for endpoints that answer with a PDF rather than JSON. */
+export async function apiBlob(
+  path: string,
+  init: RequestInit = {},
+): Promise<{ blob: Blob; headers: Headers }> {
+  const response = await authedFetch(path, init);
+
+  if (!response.ok) throw await toError(response);
+
+  return { blob: await response.blob(), headers: response.headers };
+}
+
+async function authedFetch(path: string, init: RequestInit): Promise<Response> {
   let response = await rawFetch(path, init);
 
   if (response.status === 401 && accessToken) {
@@ -123,10 +144,138 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (refreshed) response = await rawFetch(path, init);
   }
 
-  if (!response.ok) throw await toError(response);
-  if (response.status === 204) return undefined as T;
+  return response;
+}
 
-  return (await response.json()) as T;
+// ---------------------------------------------------------------------------
+// Rendering and documents
+// ---------------------------------------------------------------------------
+
+export const PAGE_FORMATS = ['A4', 'A3', 'A5', 'Letter', 'Legal', 'Tabloid', 'Ledger'] as const;
+
+export type PageFormat = (typeof PAGE_FORMATS)[number];
+
+export const WAIT_UNTIL = ['load', 'domcontentloaded', 'networkidle', 'commit'] as const;
+
+/** Mirrors RenderOptionsDto on the api. */
+export interface RenderOptions {
+  format?: PageFormat;
+  landscape?: boolean;
+  margin?: { top?: string; right?: string; bottom?: string; left?: string };
+  printBackground?: boolean;
+  scale?: number;
+  headerTemplate?: string;
+  footerTemplate?: string;
+  waitUntil?: (typeof WAIT_UNTIL)[number];
+  timeoutMs?: number;
+  javascript?: boolean;
+}
+
+export interface RenderRequest {
+  html: string;
+  options?: RenderOptions;
+  title?: string;
+  filename?: string;
+  output?: 'url' | 'binary' | 'base64';
+}
+
+export type DocumentStatus = 'queued' | 'rendering' | 'completed' | 'failed' | 'expired';
+export type DocumentSource = 'api' | 'ui';
+
+export interface DocumentSummary {
+  id: string;
+  title: string | null;
+  status: DocumentStatus;
+  source: DocumentSource;
+  pageCount: number | null;
+  byteSize: number | null;
+  durationMs: number | null;
+  errorCode: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+  creator: { id: string; name: string; email: string } | null;
+}
+
+export interface DocumentDetail extends DocumentSummary {
+  optionsJson: RenderOptions | null;
+  errorMessage: string | null;
+  isEncrypted: boolean;
+  hasWatermark: boolean;
+}
+
+export interface DocumentPage {
+  data: DocumentSummary[];
+  nextCursor?: string;
+}
+
+export interface DocumentFilters {
+  search?: string;
+  status?: DocumentStatus;
+  source?: DocumentSource;
+  limit?: number;
+  cursor?: string;
+}
+
+export function listDocuments(filters: DocumentFilters = {}): Promise<DocumentPage> {
+  const params = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(filters)) {
+    // An empty search box is no filter at all, not a search for "".
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  }
+
+  const query = params.toString();
+  return api<DocumentPage>(`/v1/documents${query ? `?${query}` : ''}`);
+}
+
+export function getDocument(id: string): Promise<DocumentDetail> {
+  return api<DocumentDetail>(`/v1/documents/${id}`);
+}
+
+export function documentDownload(id: string): Promise<{ url: string; filename: string }> {
+  return api<{ url: string; filename: string }>(`/v1/documents/${id}/file`);
+}
+
+export function deleteDocument(id: string): Promise<void> {
+  return api<void>(`/v1/documents/${id}`, { method: 'DELETE' });
+}
+
+export interface RenderResult {
+  id: string;
+  pageCount: number;
+  byteSize: number;
+  durationMs: number;
+  filename: string;
+  url: string;
+}
+
+/** A render that is kept: it lands in the documents list. */
+export function renderDocument(request: RenderRequest): Promise<RenderResult> {
+  return api<RenderResult>('/v1/pdf', { method: 'POST', body: JSON.stringify(request) });
+}
+
+export interface PreviewResult {
+  blob: Blob;
+  pageCount: number;
+  durationMs: number;
+}
+
+/** A draft render for the live pane: nothing is recorded or stored. */
+export async function previewPdf(
+  request: RenderRequest,
+  signal?: AbortSignal,
+): Promise<PreviewResult> {
+  const { blob, headers } = await apiBlob('/v1/pdf/preview', {
+    method: 'POST',
+    body: JSON.stringify(request),
+    ...(signal ? { signal } : {}),
+  });
+
+  return {
+    blob,
+    pageCount: Number(headers.get('x-page-count') ?? 0),
+    durationMs: Number(headers.get('x-duration-ms') ?? 0),
+  };
 }
 
 export const API_BASE = API_URL;

@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { Env } from '../config/env.schema.js';
 
@@ -47,6 +52,16 @@ export class StorageService {
     );
 
     this.logger.debug(`stored ${key} (${body.byteLength} bytes)`);
+  }
+
+  /**
+   * Deleting an object that is already gone is a success, not an error: S3
+   * DELETE is idempotent, and a retried deletion must not fail the caller.
+   */
+  async deletePdf(key: string): Promise<void> {
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+
+    this.logger.debug(`deleted ${key}`);
   }
 
   /**

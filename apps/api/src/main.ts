@@ -26,7 +26,13 @@ async function bootstrap(): Promise<void> {
 
   const config = app.get<ConfigService<Env, true>>(ConfigService);
 
-  app.enableCors({ origin: config.get('WEB_URL', { infer: true }), credentials: true });
+  app.enableCors({
+    origin: config.get('WEB_URL', { infer: true }),
+    credentials: true,
+    // Without this the dashboard can see the body of a render response but
+    // not the metadata the api attaches alongside it.
+    exposedHeaders: ['x-document-id', 'x-page-count', 'x-duration-ms'],
+  });
 
   // Every error leaves as RFC 7807 problem+json with a stable code (PLAN §6).
   app.useGlobalFilters(new ProblemExceptionFilter());
