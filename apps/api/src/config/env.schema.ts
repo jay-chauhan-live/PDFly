@@ -27,6 +27,24 @@ export const envSchema = z.object({
     .default('true')
     .transform((v) => v === 'true'),
 
+  // Phase 1 renderer wiring.
+  RENDERER_URL: z.url().default('http://localhost:3002'),
+  // PLAN §6: 5 MB of markup is already generous.
+  MAX_HTML_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1024)
+    .default(5 * 1024 * 1024),
+  // PLAN §10: retention drives the nightly cleanup job added in Phase 7.
+  RETENTION_DAYS: z.coerce.number().int().min(1).default(7),
+  // Signed download URLs are short-lived; never a public bucket (PLAN §11).
+  DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().min(30).default(900),
+  /**
+   * Phase 1 only. Real API tokens arrive in Phase 4; until then a single
+   * static key stands in, scoped to the seeded development organization.
+   */
+  DEV_API_KEY: z.string().min(8),
+
   JWT_ACCESS_SECRET: z.string().min(16, 'JWT_ACCESS_SECRET must be at least 16 characters'),
   JWT_REFRESH_SECRET: z.string().min(16, 'JWT_REFRESH_SECRET must be at least 16 characters'),
 

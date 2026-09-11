@@ -3,9 +3,13 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import { buildLoggerOptions } from './common/logger.options.js';
 import { validateEnv, type Env } from './config/env.schema.js';
+import { DevKeyGuard } from './auth/dev-key.guard.js';
 import { HealthModule } from './health/health.module.js';
+import { PdfModule } from './pdf/pdf.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { RedisModule } from './redis/redis.module.js';
+import { RendererModule } from './renderer/renderer.module.js';
+import { StorageModule } from './storage/storage.module.js';
 
 @Module({
   imports: [
@@ -27,7 +31,11 @@ import { RedisModule } from './redis/redis.module.js';
     }),
     PrismaModule,
     RedisModule,
+    StorageModule,
+    RendererModule,
     HealthModule,
+    PdfModule,
   ],
+  providers: [DevKeyGuard],
 })
 export class AppModule {}

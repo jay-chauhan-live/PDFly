@@ -9,6 +9,7 @@ import {
 import type { Redis } from 'ioredis';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { REDIS_CLIENT } from '../redis/redis.module.js';
+import { RendererClient } from '../renderer/renderer.client.js';
 
 @Controller('health')
 export class HealthController {
@@ -17,6 +18,7 @@ export class HealthController {
     private readonly indicator: HealthIndicatorService,
     private readonly prisma: PrismaService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly renderer: RendererClient,
   ) {}
 
   /** Liveness: is the process up? Deliberately checks no dependencies. */
@@ -29,7 +31,11 @@ export class HealthController {
   @Get()
   @HealthCheck()
   check(): Promise<HealthCheckResult> {
-    return this.health.check([() => this.checkPostgres(), () => this.checkRedis()]);
+    return this.health.check([
+      () => this.checkPostgres(),
+      () => this.checkRedis(),
+      () => this.checkRenderer(),
+    ]);
   }
 
   private async checkPostgres(): Promise<HealthIndicatorResult> {
@@ -40,6 +46,11 @@ export class HealthController {
     } catch (error) {
       return check.down({ message: (error as Error).message });
     }
+  }
+
+  private async checkRenderer(): Promise<HealthIndicatorResult> {
+    const check = this.indicator.check('renderer');
+    return (await this.renderer.healthy()) ? check.up() : check.down();
   }
 
   private async checkRedis(): Promise<HealthIndicatorResult> {

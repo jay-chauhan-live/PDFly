@@ -3,19 +3,20 @@
 Self-hosted, multi-tenant HTML-to-PDF service. See [docs/PLAN.md](docs/PLAN.md) for
 the full design; this README covers getting it running.
 
-**Status: Phase 0 (foundation) complete.** There is no rendering yet — that is
-Phase 1.
+**Status: Phase 1 (render core) complete.** HTML in, PDF out, stored and recorded.
+No auth beyond a static dev key, no watermarking or encryption yet.
 
 ## Layout
 
 ```
-apps/api     NestJS — config, logging, health, Prisma. Auth and rendering land later.
-apps/web     Next.js dashboard — shadcn/ui, theme switching.
+apps/api      NestJS — config, logging, health, Prisma, POST /v1/pdf.
+apps/renderer Isolated Playwright/Chromium pool. HTML in, raw PDF out. No DB access.
+apps/web      Next.js dashboard — shadcn/ui, theme switching.
 packages/    Shared code (empty until there is something genuinely shared).
 docs/PLAN.md The build plan.
 ```
 
-`renderer` and `worker` (PLAN §2) arrive in Phase 1.
+`worker` and the BullMQ queue (PLAN §2) arrive with async rendering in Phase 6.
 
 ## Prerequisites
 

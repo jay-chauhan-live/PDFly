@@ -21,6 +21,7 @@ env:
   JWT_ACCESS_SECRET: ci-access-secret-not-a-real-key
   JWT_REFRESH_SECRET: ci-refresh-secret-not-a-real-key
   ENCRYPTION_KEY: Y2ktb25seS1ub3QtYS1yZWFsLWtleS0wMDAwMDAwMDA=
+  DEV_API_KEY: ci-only-not-a-real-key
 
 jobs:
   verify:
@@ -58,6 +59,15 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+
+      # Playwright's postinstall downloads Chromium (~100 MB); cache it so
+      # every run does not pay for the download.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

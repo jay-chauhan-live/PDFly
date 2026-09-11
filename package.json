@@ -20,7 +20,8 @@
     "infra:reset": "docker compose down -v && docker compose up -d",
     "db:migrate": "pnpm --filter @pdfly/api exec prisma migrate dev",
     "db:generate": "pnpm --filter @pdfly/api exec prisma generate",
-    "db:studio": "pnpm --filter @pdfly/api exec prisma studio"
+    "db:studio": "pnpm --filter @pdfly/api exec prisma studio",
+    "db:seed": "pnpm --filter @pdfly/api exec prisma db seed"
   },
   "devDependencies": {
     "prettier": "3.6.2",

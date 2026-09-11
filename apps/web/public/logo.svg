@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 146 32" width="146" height="32" role="img" aria-label="PDFly">
+  <defs>
+    <linearGradient id="pdfly-logo-g" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4F6BFF"/>
+      <stop offset="1" stop-color="#8B3DFF"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="7.5" fill="url(#pdfly-logo-g)"/>
+  <path d="M11 6h6.4L23 11.6V24a2 2 0 0 1-2 2H11a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z" fill="#fff"/>
+  <path d="M17.4 6 23 11.6h-3.6a2 2 0 0 1-2-2V6Z" fill="#C7D0FF"/>
+  <path d="M16 13.8v6.4m0 0 2.6-2.6M16 20.2l-2.6-2.6" stroke="url(#pdfly-logo-g)"
+        stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- currentColor so the wordmark inverts with the theme. -->
+  <text x="42" y="22.6" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+        font-size="20" font-weight="650" letter-spacing="-0.6" fill="currentColor">PDFly</text>
+</svg>

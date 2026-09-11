@@ -3,13 +3,19 @@ import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
+import { ProblemExceptionFilter } from './common/errors/problem.filter.js';
 import type { Env } from './config/env.schema.js';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
+
+  // PLAN §6 caps markup at 5 MB; the body parser must agree or express
+  // rejects oversized payloads before the api can return its own 413.
+  app.useBodyParser('json', { limit: '6mb' });
 
   app.useLogger(app.get(Logger));
   app.enableShutdownHooks();
@@ -18,6 +24,9 @@ async function bootstrap(): Promise<void> {
   const config = app.get<ConfigService<Env, true>>(ConfigService);
 
   app.enableCors({ origin: config.get('WEB_URL', { infer: true }), credentials: true });
+
+  // Every error leaves as RFC 7807 problem+json with a stable code (PLAN §6).
+  app.useGlobalFilters(new ProblemExceptionFilter());
 
   app.useGlobalPipes(
     new ValidationPipe({

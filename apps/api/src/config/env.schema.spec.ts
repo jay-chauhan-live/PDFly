@@ -12,6 +12,7 @@ const valid = {
   JWT_ACCESS_SECRET: 'a'.repeat(32),
   JWT_REFRESH_SECRET: 'b'.repeat(32),
   ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+  DEV_API_KEY: 'dev_local_key_change_me',
 };
 
 describe('validateEnv', () => {
@@ -21,6 +22,21 @@ describe('validateEnv', () => {
     expect(env.API_PORT).toBe(3001);
     expect(env.LOG_LEVEL).toBe('info');
     expect(env.S3_REGION).toBe('us-east-1');
+  });
+
+  it('applies the Phase 1 rendering defaults', () => {
+    const env = validateEnv(valid);
+
+    expect(env.RENDERER_URL).toBe('http://localhost:3002');
+    // PLAN §6: 5 MB of markup is already generous.
+    expect(env.MAX_HTML_BYTES).toBe(5 * 1024 * 1024);
+    expect(env.RETENTION_DAYS).toBe(7);
+  });
+
+  it('requires a development API key, since it is the only Phase 1 credential', () => {
+    const { DEV_API_KEY: _omitted, ...withoutKey } = valid;
+
+    expect(() => validateEnv(withoutKey)).toThrow(/DEV_API_KEY/);
   });
 
   it('coerces numeric and boolean values that arrive as strings', () => {
