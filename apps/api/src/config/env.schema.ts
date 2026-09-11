@@ -46,7 +46,11 @@ export const envSchema = z.object({
   DEV_API_KEY: z.string().min(8),
 
   JWT_ACCESS_SECRET: z.string().min(16, 'JWT_ACCESS_SECRET must be at least 16 characters'),
-  JWT_REFRESH_SECRET: z.string().min(16, 'JWT_REFRESH_SECRET must be at least 16 characters'),
+  // PLAN §5: short-lived access token, long-lived rotating refresh token.
+  JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().min(60).default(900),
+  // Refresh tokens are opaque random values held in Redis, not JWTs, so
+  // there is no second signing secret to configure.
+  REFRESH_TTL_DAYS: z.coerce.number().int().min(1).default(30),
 
   // AES-256-GCM key for smtp_configs.password_encrypted — 32 bytes, base64.
   ENCRYPTION_KEY: z

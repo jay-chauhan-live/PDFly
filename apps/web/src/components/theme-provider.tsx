@@ -5,8 +5,9 @@ import type { ComponentProps } from 'react';
 
 /**
  * `class` strategy so shadcn's `.dark` token block applies (PLAN §9).
- * The chosen theme is mirrored to `users.theme_pref` once auth lands in
- * Phase 2, so it follows the user across devices.
+ * For a signed-in user the choice is mirrored to `users.theme_pref` and
+ * re-applied when the session resolves, so it follows them across devices —
+ * see AuthProvider, which this must therefore wrap.
  */
 export function ThemeProvider({ children, ...props }: ComponentProps<typeof NextThemesProvider>) {
   return (

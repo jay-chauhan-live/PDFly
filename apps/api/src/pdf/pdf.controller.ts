@@ -1,13 +1,12 @@
-import { Body, Controller, Post, Req, Res, UseGuards } from '@nestjs/common';
-import type { Request, Response } from 'express';
-import { DevKeyGuard } from '../auth/dev-key.guard.js';
-import { ProblemError } from '../common/errors/problem.js';
+import { Body, Controller, Post, Res } from '@nestjs/common';
+import type { Response } from 'express';
+import { CurrentContext } from '../auth/current-context.decorator.js';
 import { StorageService } from '../storage/storage.service.js';
 import { RenderPdfDto } from './dto/render-pdf.dto.js';
 import { RenderPipeline } from './render.pipeline.js';
+import type { RequestContext } from '../auth/request-context.js';
 
 @Controller('pdf')
-@UseGuards(DevKeyGuard)
 export class PdfController {
   constructor(
     private readonly pipeline: RenderPipeline,
@@ -21,15 +20,9 @@ export class PdfController {
   @Post()
   async render(
     @Body() dto: RenderPdfDto,
-    @Req() request: Request,
+    @CurrentContext() ctx: RequestContext,
     @Res() response: Response,
   ): Promise<void> {
-    const ctx = request.ctx;
-
-    if (!ctx) {
-      throw new ProblemError('unauthorized', 401, 'Missing request context');
-    }
-
     const result = await this.pipeline.run(ctx.orgId, dto, 'api');
     const output = dto.output ?? 'url';
 

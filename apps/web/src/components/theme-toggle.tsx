@@ -3,6 +3,7 @@
 import { Monitor, Moon, Sun } from 'lucide-react';
 import { useTheme } from 'next-themes';
 
+import { useOptionalAuth } from '@/components/auth-provider';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -19,6 +20,11 @@ const OPTIONS = [
 
 export function ThemeToggle() {
   const { setTheme } = useTheme();
+  const auth = useOptionalAuth();
+
+  // Signed in, the choice belongs to the account and follows the user to
+  // their next device. Signed out, next-themes' local storage is all there is.
+  const choose = auth?.user ? auth.saveThemePref : setTheme;
 
   return (
     <DropdownMenu>
@@ -31,7 +37,7 @@ export function ThemeToggle() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {OPTIONS.map(({ value, label, Icon }) => (
-          <DropdownMenuItem key={value} onClick={() => setTheme(value)}>
+          <DropdownMenuItem key={value} onClick={() => choose(value)}>
             <Icon aria-hidden="true" />
             {label}
           </DropdownMenuItem>

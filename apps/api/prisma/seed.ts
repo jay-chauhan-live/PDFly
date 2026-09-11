@@ -1,7 +1,8 @@
 /**
- * Development seed. Creates the organization that the Phase 1 static API key
- * resolves to (see src/auth/dev-key.guard.ts). Phase 2 replaces this with
- * real registration.
+ * Development seed. Creates the organization that the static development API
+ * key resolves to (see the API-key branch of src/auth/auth.guard.ts). Real
+ * per-organization API tokens replace it in Phase 4; dashboard users get
+ * their own organization at registration.
  */
 import { PrismaPg } from '@prisma/adapter-pg';
 import { resolve } from 'node:path';

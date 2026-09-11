@@ -13,6 +13,7 @@ const STATUS_TO_CODE: Record<number, ProblemCode> = {
   401: 'unauthorized',
   404: 'not_found',
   413: 'payload_too_large',
+  503: 'service_unavailable',
 };
 
 @Catch()
@@ -61,19 +62,12 @@ export class ProblemExceptionFilter implements ExceptionFilter {
 
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
-      const body = exception.getResponse();
-
-      // class-validator failures arrive as { message: string[] }.
-      const extra =
-        typeof body === 'object' && body !== null && 'message' in body
-          ? { errors: (body as { message: unknown }).message }
-          : {};
 
       return {
         status,
         code: STATUS_TO_CODE[status] ?? 'internal_error',
         detail: exception.message,
-        extra,
+        extra: this.extraFrom(exception.getResponse()),
       };
     }
 
@@ -84,5 +78,23 @@ export class ProblemExceptionFilter implements ExceptionFilter {
       detail: 'An unexpected error occurred',
       extra: {},
     };
+  }
+
+  /** Detail worth forwarding from a framework exception's body, and nothing else. */
+  private extraFrom(body: unknown): Record<string, unknown> {
+    if (typeof body !== 'object' || body === null) return {};
+
+    // class-validator failures arrive as { message: string[] }.
+    const { message } = body as { message?: unknown };
+    if (Array.isArray(message)) return { errors: message as string[] };
+
+    // Terminus names the dependency that failed. Collapsing that into a bare
+    // 503 leaves an operator with nothing to act on, so it is carried through.
+    if ('details' in body) {
+      const { info, error, details } = body as Record<string, unknown>;
+      return { info, error, details };
+    }
+
+    return {};
   }
 }

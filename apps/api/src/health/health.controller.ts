@@ -7,10 +7,17 @@ import {
   HealthIndicatorService,
 } from '@nestjs/terminus';
 import type { Redis } from 'ioredis';
+import { Public } from '../auth/public.decorator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { REDIS_CLIENT } from '../redis/redis.module.js';
 import { RendererClient } from '../renderer/renderer.client.js';
 
+/**
+ * Unauthenticated on purpose: a load balancer, a container runtime and
+ * `docker compose` health checks have no credential to present, and the
+ * response reveals nothing beyond whether dependencies answer.
+ */
+@Public()
 @Controller('health')
 export class HealthController {
   constructor(

@@ -10,6 +10,7 @@ export type ProblemCode =
   | 'payload_too_large'
   | 'quota_exceeded'
   | 'renderer_unavailable'
+  | 'service_unavailable'
   | 'unauthorized'
   | 'not_found'
   | 'internal_error';
