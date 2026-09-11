@@ -14,7 +14,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "prisma:seed": "prisma db seed"
+    "prisma:seed": "prisma db seed",
+    "seed:admin": "tsx src/cli/seed-admin.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1130.0",
@@ -26,6 +27,7 @@
     "@nestjs/platform-express": "12.0.1",
     "@nestjs/schedule": "^12.0.1",
     "@nestjs/terminus": "12.0.0",
+    "@pdfly/net-guard": "workspace:*",
     "@prisma/adapter-pg": "7.10.0",
     "@prisma/client": "7.10.0",
     "argon2": "0.45.1",

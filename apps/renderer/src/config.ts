@@ -21,6 +21,17 @@ const schema = z.object({
   // How long a request waits for a free browser before giving up. The api
   // turns this into a 503 with Retry-After.
   POOL_ACQUIRE_TIMEOUT_MS: z.coerce.number().int().min(100).default(10_000),
+
+  /**
+   * Chromium's only route out, when there is one (PLAN §11).
+   *
+   * In production the renderer sits on a network with no gateway, so this is
+   * the sole path for an external asset — and the proxy resolves DNS itself,
+   * which is what closes the rebinding gap the in-process address check
+   * cannot. Unset in development, where the renderer just uses the host's
+   * network directly.
+   */
+  EGRESS_PROXY: z.string().url().optional(),
 });
 
 export type RendererConfig = z.infer<typeof schema>;

@@ -12,6 +12,20 @@ const execFileAsync = promisify(execFile);
  * sandbox needs rather than disabling it, since this process renders
  * attacker-controlled markup.
  */
+function launchArgs(config: RendererConfig): string[] {
+  if (!config.EGRESS_PROXY) return LAUNCH_ARGS;
+
+  return [
+    ...LAUNCH_ARGS,
+    // Every connection goes through the proxy, including ones Playwright's
+    // request router never sees.
+    `--proxy-server=${config.EGRESS_PROXY}`,
+    // Without this Chromium bypasses the proxy for anything that looks local,
+    // which is precisely the set of destinations the proxy exists to refuse.
+    '--proxy-bypass-list=<-loopback>',
+  ];
+}
+
 const LAUNCH_ARGS = [
   // Chromium's default /dev/shm is often too small in containers, and the
   // crash it causes looks like a random hang.
@@ -76,7 +90,7 @@ export class BrowserPool {
    * enforced.
    */
   private async launch(): Promise<{ server: BrowserServer; browser: Browser }> {
-    const server = await chromium.launchServer({ args: LAUNCH_ARGS });
+    const server = await chromium.launchServer({ args: launchArgs(this.config) });
     const browser = await chromium.connect(server.wsEndpoint());
     return { server, browser };
   }

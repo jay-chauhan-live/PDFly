@@ -14,6 +14,7 @@ import { CommonModule } from './common/common.module.js';
 import { QueueModule } from './queue/queue.module.js';
 import { WebhooksModule } from './webhooks/webhooks.module.js';
 import { SmtpModule } from './smtp/smtp.module.js';
+import { RetentionModule } from './retention/retention.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
 import { TokensModule } from './tokens/tokens.module.js';
@@ -60,6 +61,7 @@ import { StorageModule } from './storage/storage.module.js';
     WebhooksModule,
     QueueModule,
     SmtpModule,
+    RetentionModule,
   ],
   // Authentication is on by default; routes opt out with @Public() (PLAN §5).
   // Order matters: APP_GUARD providers run in declaration order, and the rate

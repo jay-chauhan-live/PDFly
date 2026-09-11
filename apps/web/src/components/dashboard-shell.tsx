@@ -3,7 +3,15 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, type ReactNode } from 'react';
-import { FileText, LayoutDashboard, LogOut, PlayCircle, Settings, User } from 'lucide-react';
+import {
+  CircleHelp,
+  FileText,
+  LayoutDashboard,
+  LogOut,
+  PlayCircle,
+  Settings,
+  User,
+} from 'lucide-react';
 import { useAuth } from '@/components/auth-provider';
 import { Logo } from '@/components/logo';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -17,6 +25,7 @@ const NAV = [
   { href: '/documents', label: 'Documents', Icon: FileText, ready: true },
   { href: '/settings/tokens', label: 'Settings', Icon: Settings, ready: true },
   { href: '/profile', label: 'Profile', Icon: User, ready: true },
+  { href: '/help', label: 'Help', Icon: CircleHelp, ready: true },
 ] as const;
 
 /**

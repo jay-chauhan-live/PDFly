@@ -50,6 +50,9 @@ export function HtmlEditor({
       theme={resolvedTheme === 'dark' ? 'vs-dark' : 'vs'}
       loading={<EditorFallback />}
       options={{
+        // Monaco's real input is a hidden <textarea>; without this it is an
+        // unnamed control to anything reading the page aloud.
+        ariaLabel: 'HTML source for the document being rendered',
         fontSize: 13,
         minimap: { enabled: false },
         scrollBeyondLastLine: false,

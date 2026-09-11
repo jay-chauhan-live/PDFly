@@ -145,6 +145,8 @@ export class RenderPipeline {
       // it unreadable to us as well as to everyone else.
       const pageCount = await this.countPages(rendered.pdf);
 
+      this.assertWithinPageLimit(pageCount);
+
       // Order is not negotiable (PLAN §3): an encrypted PDF cannot be stamped,
       // so the watermark goes on first and encryption is always last.
       const stamped = dto.watermark
@@ -236,6 +238,24 @@ export class RenderPipeline {
     });
 
     return document.id;
+  }
+
+  /**
+   * A page cap (PLAN §11). Markup with a runaway loop or an enormous table
+   * produces a document nobody wanted, and the cost of watermarking,
+   * encrypting and storing it is real. Checked after rendering because there
+   * is no way to know the count before.
+   */
+  private assertWithinPageLimit(pageCount: number): void {
+    const max = this.config.get('MAX_PAGES', { infer: true });
+
+    if (pageCount > max) {
+      throw new ProblemError(
+        'payload_too_large',
+        413,
+        `This document is ${pageCount} pages; the limit is ${max}`,
+      );
+    }
   }
 
   private assertWithinSizeLimit(html: string): void {

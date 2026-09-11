@@ -35,6 +35,14 @@ export const envSchema = z.object({
     .int()
     .min(1024)
     .default(5 * 1024 * 1024),
+  /** PLAN §11: a page-count cap, alongside the markup size cap. */
+  MAX_PAGES: z.coerce.number().int().min(1).default(500),
+  /** Documents past their expiry are swept nightly (PLAN §10). */
+  RETENTION_SWEEP_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+
   // PLAN §10: retention drives the nightly cleanup job added in Phase 7.
   RETENTION_DAYS: z.coerce.number().int().min(1).default(7),
   // Signed download URLs are short-lived; never a public bucket (PLAN §11).

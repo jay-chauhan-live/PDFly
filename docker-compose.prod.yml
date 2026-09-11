@@ -1,0 +1,173 @@
+# Production topology, and the container hardening PLAN §11 asks for.
+#
+# Run with:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# The shape that matters here is the network split. `renderer` sits on an
+# isolated network with no route to Postgres, Redis or MinIO, so even a full
+# compromise of the browser process reaches no data. Its only way out is the
+# egress proxy, which resolves DNS itself and refuses private destinations at
+# connect time.
+
+name: pdfly
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pdfly}:${POSTGRES_PASSWORD:-pdfly}@postgres:5432/${POSTGRES_DB:-pdfly}?schema=public
+      REDIS_URL: redis://redis:6379
+      RENDERER_URL: http://renderer:3002
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3_BUCKET: ${S3_BUCKET:-pdfly}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-pdfly}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-pdfly-dev-secret}
+      S3_FORCE_PATH_STYLE: 'true'
+      WEB_URL: ${WEB_URL:-http://localhost:3000}
+      API_URL: ${API_URL:-http://localhost:3001}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY}
+      WEBHOOK_SIGNING_SECRET: ${WEBHOOK_SIGNING_SECRET:?set WEBHOOK_SIGNING_SECRET}
+      # Private webhook destinations are an SSRF hole in production.
+      WEBHOOK_ALLOW_PRIVATE: 'false'
+    ports:
+      - '${API_PORT:-3001}:3001'
+    networks: [backend, render]
+    # Nothing writes to the image at runtime; the only mutable path is the
+    # scratch directory qpdf needs, which is a tmpfs rather than a disk.
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    deploy:
+      resources:
+        limits: { memory: 1g }
+
+  renderer:
+    build:
+      context: .
+      dockerfile: apps/renderer/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      POOL_SIZE: ${POOL_SIZE:-2}
+      # The renderer's only way out. Without this the isolated network would
+      # simply sever external assets rather than filter them.
+      EGRESS_PROXY: http://egress-proxy:3128
+    # Deliberately no `ports`: the renderer is reachable from the api over the
+    # internal network and from nowhere else.
+    networks: [render]
+    depends_on: [egress-proxy]
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+      # Chromium's default /dev/shm is 64 MB in a container, which it will
+      # exhaust and then crash in a way that looks like a random hang.
+      # --disable-dev-shm-usage covers it too; both is cheap.
+      - /dev/shm:size=1g
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    # Chromium's sandbox builds its own user and PID namespaces, which needs
+    # unshare/clone syscalls that Docker's default seccomp profile denies.
+    # PLAN §11 is explicit that the answer is to grant what the sandbox needs
+    # rather than pass --no-sandbox, since this is the process executing
+    # attacker-controlled markup: an unsandboxed renderer turns one browser
+    # bug into full container access. A seccomp profile allowing only
+    # clone/unshare/setns would be tighter than the whole capability and is
+    # the obvious next tightening.
+    cap_add: [SYS_ADMIN]
+    deploy:
+      resources:
+        limits: { memory: 2g, cpus: '2' }
+
+  # Runs migrations and exits. A separate image because the Prisma CLI is a
+  # devDependency the runtime image prunes away — and because a tool that can
+  # alter the schema has no business inside the process serving traffic.
+  #
+  # `profiles` keeps it out of `docker compose up`; the deploy invokes it by
+  # name with `run --rm`.
+  api-migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: migrate
+    profiles: [tools]
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pdfly}:${POSTGRES_PASSWORD:-pdfly}@postgres:5432/${POSTGRES_DB:-pdfly}?schema=public
+    networks: [backend]
+    restart: 'no'
+
+  # Chromium's only route off the isolated network (PLAN §11). It resolves DNS
+  # itself and refuses private destinations at connect time, which is the DNS
+  # rebinding gap an in-process check cannot close.
+  egress-proxy:
+    image: ubuntu/squid:latest
+    restart: unless-stopped
+    volumes:
+      - ./docker/squid-egress.conf:/etc/squid/squid.conf:ro
+    # Both networks: reachable from the renderer, and able to reach outward.
+    # This is the one bridge, and it is a filtering one.
+    networks: [render, egress]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits: { memory: 256m }
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+    restart: unless-stopped
+    depends_on: [api]
+    ports:
+      - '3000:3000'
+    networks: [frontend]
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    deploy:
+      resources:
+        limits: { memory: 512m }
+
+  # The backing services keep their host ports in development. In a real
+  # deployment they would lose them and live only on `backend`.
+  postgres:
+    networks: [backend]
+
+  redis:
+    networks: [backend]
+
+  minio:
+    networks: [backend]
+
+  minio-init:
+    networks: [backend]
+
+networks:
+  frontend:
+  backend:
+  # `internal: true` is the control: no gateway, so nothing on this network
+  # reaches the host, the internet, or the database on its own. The renderer
+  # lives here and has exactly two peers — the api, which calls in, and the
+  # egress proxy, which is the only way out and filters what goes through it.
+  render:
+    internal: true
+  # Where the egress proxy has its outward route. Nothing else joins it.
+  egress:

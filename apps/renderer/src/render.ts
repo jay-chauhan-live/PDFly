@@ -1,3 +1,4 @@
+import { hostMatchesAllowlist, resolvesToPrivateAddress } from '@pdfly/net-guard';
 import type { Browser } from 'playwright';
 import { RenderError, type RenderRequest } from './contract.js';
 import type { RendererConfig } from './config.js';
@@ -23,15 +24,39 @@ function isBlockedScheme(url: string): boolean {
   return BLOCKED_SCHEMES.some((scheme) => lower.startsWith(scheme));
 }
 
-function hostAllowed(url: string, allowlist: string[]): boolean {
-  if (allowlist.length === 0) return true;
+/**
+ * Decides whether Chromium may fetch one external asset.
+ *
+ * This is the SSRF control (PLAN §11). The document being rendered is
+ * attacker-supplied markup, and an `<img src>` is a request this server makes
+ * from inside the network. The host is resolved and every answer checked
+ * before the connection is allowed, so a public name pointing at
+ * 169.254.169.254 is refused rather than fetched.
+ *
+ * The remaining gap is rebinding: the resolver can answer publicly here and
+ * privately when Chromium connects a moment later. Closing that needs the
+ * connection pinned to the address that was checked, which is the egress
+ * proxy's job — see the network isolation in docker-compose.
+ */
+async function assetAllowed(
+  url: string,
+  allowlist: string[],
+): Promise<{ allowed: boolean; reason?: string }> {
+  let hostname: string;
 
   try {
-    const { hostname } = new URL(url);
-    return allowlist.some((entry) => hostname === entry || hostname.endsWith(`.${entry}`));
+    hostname = new URL(url).hostname;
   } catch {
-    return false;
+    return { allowed: false, reason: 'unparseable URL' };
   }
+
+  if (!hostMatchesAllowlist(hostname, allowlist)) {
+    return { allowed: false, reason: 'host not in the allowlist' };
+  }
+
+  const verdict = await resolvesToPrivateAddress(hostname);
+
+  return verdict.allowed ? { allowed: true } : { allowed: false, reason: verdict.reason };
 }
 
 function resolveTimeout(request: RenderRequest, config: RendererConfig): number {
@@ -45,6 +70,9 @@ export interface RenderResult {
   /** Assets the policy refused, useful for explaining a blank-looking PDF. */
   blockedAssets: string[];
 }
+
+/** Longer than this and the document is almost certainly a mistake or an attack. */
+export const MAX_PAGES = 500;
 
 export async function renderPdf(
   browser: Browser,
@@ -96,8 +124,10 @@ export async function renderPdf(
         return;
       }
 
-      if (!hostAllowed(url, request.assetHostAllowlist)) {
-        blockedAssets.push(url);
+      const verdict = await assetAllowed(url, request.assetHostAllowlist);
+
+      if (!verdict.allowed) {
+        blockedAssets.push(`${url} (${verdict.reason ?? 'refused'})`);
         await route.abort('blockedbyclient');
         return;
       }

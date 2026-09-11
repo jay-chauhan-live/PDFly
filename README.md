@@ -7,19 +7,20 @@ The build plan it was written against (`docs/PLAN.md`) is kept locally and is
 not published; the `PLAN §n` citations throughout the code refer to its
 sections.
 
-**Status: Phase 6 (async, webhooks and SMTP) complete.** Renders can now happen
-off the request: enqueue and poll, or be told by a signed webhook. Organizations
-configure their own SMTP and get alerted when a render fails. What remains is
-Phase 7 — the egress proxy and container hardening, a retention job, and the
-help content.
+**Status: Phase 7 (hardening and polish) complete — all seven phases are done.**
+The renderer now sits on an isolated network behind a filtering egress proxy and
+refuses private addresses outright, expired documents are swept nightly,
+containers run non-root with read-only root filesystems, and the dashboard has
+help content and a clean accessibility audit.
 
 ## Layout
 
 ```
 apps/api      NestJS — auth, rendering, documents, tokens, queue worker, mail.
 apps/renderer Isolated Playwright/Chromium pool. HTML in, raw PDF out. No DB access.
-apps/web      Next.js dashboard — auth, playground, history, tokens, usage.
-packages/    Shared code (empty until there is something genuinely shared).
+apps/web      Next.js dashboard — auth, playground, history, tokens, usage, help.
+packages/    Shared code. `net-guard` holds the private-address rules both the
+             api and the renderer enforce, which is what it was kept empty for.
 ```
 
 The BullMQ queue is in place; its worker runs inside `apps/api` rather than as
@@ -122,6 +123,18 @@ needs one answers 403 — not 401 — when a valid credential lacks it.
 `/health` is deliberately unauthenticated — a load balancer has no credential to
 present.
 
+## Deploying
+
+[DEPLOYMENT.md](DEPLOYMENT.md) covers the whole path: server prerequisites, the
+self-hosted runner on primary-server, secrets, what the pipeline does on each
+push, Slack notifications, rollback, and day-two operations.
+
+The short version: CI passes on `main`, then the Deploy workflow runs on a
+runner that lives on the target host. It rsyncs the tree to `/srv/pdfly`,
+builds the images there, applies migrations, restarts the stack, seeds the
+first administrator if there is not one, and health-checks. A failure rolls
+back to the previous release and says so in Slack.
+
 ## Checks
 
 ```bash
@@ -172,6 +185,24 @@ hand-written fake cannot reproduce.
 - **Route protection in the dashboard is UX, not security.** The refresh cookie
   is scoped to the api's `/v1/auth` path, so Next's server never sees it and
   middleware could not read it. Every endpoint enforces auth itself.
+- **SSRF is the whole threat model** (PLAN §11), and it is defended in two
+  places that must not drift apart — hence `packages/net-guard`. The renderer
+  resolves every external asset hostname and refuses private, loopback,
+  link-local and metadata addresses before Chromium connects; the api does the
+  same for webhook destinations. Checking the name alone would not do it: a
+  public name can have an A record pointing at `169.254.169.254`.
+- **The in-process check cannot close DNS rebinding**, where a resolver answers
+  publicly at check time and privately at connect time. That is what the egress
+  proxy in `docker-compose.prod.yml` is for: the renderer's network has no
+  gateway, so its only route out is a squid that resolves DNS itself and applies
+  the same denials at connect time.
+- **Chromium keeps its own sandbox.** `--no-sandbox` would turn one browser bug
+  into full container access, so the container is granted what the sandbox needs
+  instead. A seccomp profile allowing only `clone`/`unshare`/`setns` would be
+  tighter than the capability and is the obvious next step.
+- **Retention is a promise, not just a cost control.** The nightly sweep deletes
+  the stored object before the row — the reverse would orphan the object with
+  nothing left pointing at it and nothing to retry from.
 - **The queue worker runs inside the api process**, not as the separate
   deployable PLAN §2 describes. The isolation that matters for security is the
   renderer's — that is the process executing attacker-supplied markup, and it

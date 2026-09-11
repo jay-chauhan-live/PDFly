@@ -21,7 +21,8 @@
     "db:migrate": "pnpm --filter @pdfly/api exec prisma migrate dev",
     "db:generate": "pnpm --filter @pdfly/api exec prisma generate",
     "db:studio": "pnpm --filter @pdfly/api exec prisma studio",
-    "db:seed": "pnpm --filter @pdfly/api exec prisma db seed"
+    "db:seed": "pnpm --filter @pdfly/api exec prisma db seed",
+    "db:seed:admin": "pnpm --filter @pdfly/api exec tsx src/cli/seed-admin.ts"
   },
   "devDependencies": {
     "prettier": "3.6.2",
