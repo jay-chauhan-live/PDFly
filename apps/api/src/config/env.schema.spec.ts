@@ -11,7 +11,6 @@ const valid = {
   S3_SECRET_ACCESS_KEY: 'pdfly-dev-secret',
   JWT_ACCESS_SECRET: 'a'.repeat(32),
   ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
-  DEV_API_KEY: 'dev_local_key_change_me',
 };
 
 describe('validateEnv', () => {
@@ -32,10 +31,10 @@ describe('validateEnv', () => {
     expect(env.RETENTION_DAYS).toBe(7);
   });
 
-  it('requires a development API key, since it is the only Phase 1 credential', () => {
-    const { DEV_API_KEY: _omitted, ...withoutKey } = valid;
+  it('requires the access-token signing secret', () => {
+    const { JWT_ACCESS_SECRET: _omitted, ...withoutSecret } = valid;
 
-    expect(() => validateEnv(withoutKey)).toThrow(/DEV_API_KEY/);
+    expect(() => validateEnv(withoutSecret)).toThrow(/JWT_ACCESS_SECRET/);
   });
 
   it('coerces numeric and boolean values that arrive as strings', () => {

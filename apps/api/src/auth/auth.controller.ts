@@ -6,6 +6,7 @@ import { AuthService, type AuthenticatedUser, type AuthResult } from './auth.ser
 import { CurrentContext } from './current-context.decorator.js';
 import { LoginDto, RegisterDto } from './dto/auth.dto.js';
 import { Public } from './public.decorator.js';
+import { RateLimit } from '../ratelimit/rate-limit.guard.js';
 import type { Env } from '../config/env.schema.js';
 import type { RequestContext } from './request-context.js';
 
@@ -47,6 +48,9 @@ export class AuthController {
   }
 
   @Public()
+  // Every page load and every open tab refreshes; this is not a login attempt
+  // and must not share the budget that exists to slow password guessing.
+  @RateLimit({ limit: 60, bucket: 'refresh' })
   @Post('refresh')
   @HttpCode(200)
   async refresh(@Req() request: Request, @Res() response: Response): Promise<void> {
@@ -66,6 +70,7 @@ export class AuthController {
   }
 
   @Public()
+  @RateLimit({ limit: 60, bucket: 'refresh' })
   @Post('logout')
   @HttpCode(204)
   async logout(@Req() request: Request, @Res() response: Response): Promise<void> {

@@ -11,8 +11,11 @@ import { ProblemError, type ProblemCode } from './problem.js';
 const STATUS_TO_CODE: Record<number, ProblemCode> = {
   400: 'invalid_request',
   401: 'unauthorized',
+  403: 'forbidden',
   404: 'not_found',
+  409: 'conflict',
   413: 'payload_too_large',
+  429: 'rate_limited',
   503: 'service_unavailable',
 };
 

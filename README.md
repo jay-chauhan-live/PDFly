@@ -3,18 +3,18 @@
 Self-hosted, multi-tenant HTML-to-PDF service. See [docs/PLAN.md](docs/PLAN.md) for
 the full design; this README covers getting it running.
 
-**Status: Phase 3 (playground and history) complete.** A working product: write
-HTML in a Monaco editor, watch the PDF render live, copy the equivalent API call,
-save a render, then search, filter, download and delete it from the documents
-list. No watermarking or encryption yet, and no email — verification and password
-reset wait for SMTP in Phase 6.
+**Status: Phase 4 (API tokens and quotas) complete.** A service you could point a
+customer at: scoped API tokens, per-credential rate limits, idempotent renders,
+usage metering, and a dashboard that shows what it all cost. No watermarking or
+encryption yet, and no email — verification and password reset wait for SMTP in
+Phase 6.
 
 ## Layout
 
 ```
 apps/api      NestJS — config, logging, health, Prisma, auth, rendering, documents.
 apps/renderer Isolated Playwright/Chromium pool. HTML in, raw PDF out. No DB access.
-apps/web      Next.js dashboard — shadcn/ui, auth, playground, document history.
+apps/web      Next.js dashboard — auth, playground, history, tokens, usage.
 packages/    Shared code (empty until there is something genuinely shared).
 docs/PLAN.md The build plan.
 ```
@@ -73,12 +73,12 @@ curl -s localhost:3001/v1/auth/login -c jar.txt \
   -H 'content-type: application/json' \
   -d '{"email":"you@example.com","password":"correct horse battery staple"}' | jq
 
-# Machine credential. Still the single static development key until Phase 4
-# mints real per-organization tokens; it resolves to the seeded `development`
-# org, so run `pnpm db:seed` first.
+# Machine credential. Mint one at /settings/tokens, or use the one `pnpm db:seed`
+# prints — it is shown once and never recoverable, exactly like a real one.
 curl -s localhost:3001/v1/pdf \
-  -H "x-api-key: $DEV_API_KEY" \
+  -H "Authorization: Bearer $PDFLY_TOKEN" \
   -H 'content-type: application/json' \
+  -H "Idempotency-Key: $(uuidgen)" \
   -d '{"html":"<h1>Hello</h1>"}' | jq
 ```
 
@@ -95,9 +95,18 @@ GET    /v1/documents           list — search, status, source, date, keyset pag
 GET    /v1/documents/:id       metadata and the options it was rendered with
 GET    /v1/documents/:id/file  short-lived signed download URL
 DELETE /v1/documents/:id       removes the row and the stored object
+GET    /v1/usage               today, month to date, a daily series, durations
+GET    /v1/tokens              POST /v1/tokens   DELETE /v1/tokens/:id
 POST   /v1/auth/{register,login,refresh,logout}   GET /v1/auth/me
 PATCH  /v1/users/me            POST /v1/users/me/password
 ```
+
+Every response carries `X-RateLimit-Limit`, `-Remaining` and `-Reset`. Renders
+accept an `Idempotency-Key`; a retry with the same key returns the original
+document and `Idempotent-Replay: true` rather than rendering again.
+
+Token scopes: `pdf:render`, `documents:read`, `documents:delete`. A route that
+needs one answers 403 — not 401 — when a valid credential lacks it.
 
 `/health` is deliberately unauthenticated — a load balancer has no credential to
 present.
@@ -164,6 +173,25 @@ hand-written fake cannot reproduce.
   match that `to_tsvector` cannot serve. See the third migration.
 - **Listing uses keyset pagination**, not offsets: renders arrive at the top of
   the list constantly, and an offset would skip or repeat rows as they do.
+- **Tokens are `pdfly_live_<prefix>_<secret>`.** PLAN §5 still writes
+  `ink_live_`, from the project's earlier name. Only `sha256(whole token)` is
+  stored; the prefix is an indexed lookup key so verification is one read and a
+  constant-time digest comparison. Do not split a token on `_` — base64url's
+  alphabet contains it, so about half of all secrets do too.
+- **`last_used_at` is throttled to one write per token per minute.** It answers
+  "is anything still using this?", which does not need to be exact, and writing
+  to Postgres on every authenticated request would cost real money for no real
+  information.
+- **Rate limits are per credential, not per organization.** One runaway script
+  must not starve every other integration the same customer runs. Unauthenticated
+  routes fall back to the client address, which is what matters for password
+  guessing. Health probes are exempt: infrastructure has no credential and no
+  way to back off.
+- **Usage never counts the documents table.** Counters live in Redis and flush to
+  `usage_daily` every minute; the dashboard reads the rollup plus whatever has
+  not flushed yet, so a render from ten seconds ago still appears. Durations are
+  the exception — a distribution is not a counter, so p50/p95 come from the day's
+  documents via `percentile_cont`.
 - **Monaco is bundled, not fetched from a CDN.** `@monaco-editor/react` defaults
   to jsDelivr; pointing it at the npm package keeps the dashboard working
   offline and its version pinned to the lockfile. The worker entry points need

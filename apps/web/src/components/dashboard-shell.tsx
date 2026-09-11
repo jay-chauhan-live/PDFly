@@ -15,7 +15,7 @@ const NAV = [
   { href: '/', label: 'Overview', Icon: LayoutDashboard, ready: true },
   { href: '/playground', label: 'Playground', Icon: PlayCircle, ready: true },
   { href: '/documents', label: 'Documents', Icon: FileText, ready: true },
-  { href: '/settings/tokens', label: 'Settings', Icon: Settings, ready: false },
+  { href: '/settings/tokens', label: 'Settings', Icon: Settings, ready: true },
   { href: '/profile', label: 'Profile', Icon: User, ready: true },
 ] as const;
 

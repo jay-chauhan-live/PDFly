@@ -97,7 +97,7 @@ export class DocumentsService {
 
     if (document.status !== 'completed' || !document.storageKey) {
       throw new ProblemError(
-        'not_found',
+        'conflict',
         409,
         `This document is ${document.status}; there is no file to download`,
       );

@@ -8,6 +8,7 @@ import {
 } from '@nestjs/terminus';
 import type { Redis } from 'ioredis';
 import { Public } from '../auth/public.decorator.js';
+import { SkipRateLimit } from '../ratelimit/rate-limit.guard.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { REDIS_CLIENT } from '../redis/redis.module.js';
 import { RendererClient } from '../renderer/renderer.client.js';
@@ -18,6 +19,7 @@ import { RendererClient } from '../renderer/renderer.client.js';
  * response reveals nothing beyond whether dependencies answer.
  */
 @Public()
+@SkipRateLimit()
 @Controller('health')
 export class HealthController {
   constructor(

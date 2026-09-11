@@ -1,10 +1,12 @@
 import { Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Query } from '@nestjs/common';
 import { CurrentContext } from '../auth/current-context.decorator.js';
+import { RequireScopes } from '../tokens/scopes.js';
 import { DocumentsService } from './documents.service.js';
 import { ListDocumentsDto } from './dto/list-documents.dto.js';
 import type { RequestContext } from '../auth/request-context.js';
 
 @Controller('documents')
+@RequireScopes('documents:read')
 export class DocumentsController {
   constructor(private readonly documents: DocumentsService) {}
 
@@ -29,7 +31,10 @@ export class DocumentsController {
     return this.documents.downloadUrl(ctx.orgId, id);
   }
 
+  // Deleting needs its own scope on top of the controller's: a token issued
+  // to fetch documents must not be able to destroy them.
   @Delete(':id')
+  @RequireScopes('documents:read', 'documents:delete')
   @HttpCode(204)
   remove(
     @CurrentContext() ctx: RequestContext,

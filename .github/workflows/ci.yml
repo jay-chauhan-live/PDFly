@@ -20,7 +20,6 @@ env:
   S3_SECRET_ACCESS_KEY: pdfly-dev-secret
   JWT_ACCESS_SECRET: ci-access-secret-not-a-real-key
   ENCRYPTION_KEY: Y2ktb25seS1ub3QtYS1yZWFsLWtleS0wMDAwMDAwMDA=
-  DEV_API_KEY: ci-only-not-a-real-key
 
 jobs:
   verify:

@@ -254,6 +254,83 @@ export function renderDocument(request: RenderRequest): Promise<RenderResult> {
   return api<RenderResult>('/v1/pdf', { method: 'POST', body: JSON.stringify(request) });
 }
 
+// ---------------------------------------------------------------------------
+// API tokens
+// ---------------------------------------------------------------------------
+
+export const TOKEN_SCOPES = ['pdf:render', 'documents:read', 'documents:delete'] as const;
+
+export type TokenScope = (typeof TOKEN_SCOPES)[number];
+
+export interface ApiTokenSummary {
+  id: string;
+  name: string;
+  prefix: string;
+  /** Enough to recognise, nothing to replay. */
+  masked: string;
+  scopes: TokenScope[];
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  creator: { id: string; name: string; email: string } | null;
+}
+
+/** The only response that ever carries the secret (PLAN §5). */
+export interface MintedApiToken extends ApiTokenSummary {
+  token: string;
+}
+
+export function listTokens(): Promise<ApiTokenSummary[]> {
+  return api<ApiTokenSummary[]>('/v1/tokens');
+}
+
+export function createToken(input: {
+  name: string;
+  scopes: TokenScope[];
+  expiresAt?: string;
+}): Promise<MintedApiToken> {
+  return api<MintedApiToken>('/v1/tokens', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function revokeToken(id: string): Promise<ApiTokenSummary> {
+  return api<ApiTokenSummary>(`/v1/tokens/${id}`, { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------------------------
+// Usage
+// ---------------------------------------------------------------------------
+
+export interface UsageTotals {
+  renders: number;
+  pages: number;
+  bytes: number;
+  failures: number;
+}
+
+export interface UsageDay extends UsageTotals {
+  date: string;
+}
+
+export interface UsageResponse {
+  today: UsageDay;
+  month: UsageTotals;
+  period: UsageTotals;
+  daily: UsageDay[];
+  performance: {
+    total: number;
+    failed: number;
+    /** Null when nothing has been rendered today. */
+    successRate: number | null;
+    p50DurationMs: number | null;
+    p95DurationMs: number | null;
+  };
+}
+
+export function getUsage(days = 30): Promise<UsageResponse> {
+  return api<UsageResponse>(`/v1/usage?days=${days}`);
+}
+
 export interface PreviewResult {
   blob: Blob;
   pageCount: number;

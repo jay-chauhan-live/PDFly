@@ -5,6 +5,7 @@ import { ProblemError } from '../common/errors/problem.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RendererClient } from '../renderer/renderer.client.js';
 import { StorageService } from '../storage/storage.service.js';
+import { UsageService } from '../usage/usage.service.js';
 import type { Env } from '../config/env.schema.js';
 import type { RenderPdfDto } from './dto/render-pdf.dto.js';
 
@@ -51,6 +52,7 @@ export class RenderPipeline {
     private readonly prisma: PrismaService,
     private readonly renderer: RendererClient,
     private readonly storage: StorageService,
+    private readonly usage: UsageService,
     private readonly config: ConfigService<Env, true>,
   ) {}
 
@@ -120,6 +122,12 @@ export class RenderPipeline {
         },
       });
 
+      await this.usage.recordRender(orgId, {
+        pages: pageCount,
+        bytes: rendered.pdf.byteLength,
+        failed: false,
+      });
+
       this.logger.log(
         `rendered ${document.id}: ${pageCount} page(s), ${rendered.pdf.byteLength} bytes, ${durationMs}ms`,
       );
@@ -146,6 +154,11 @@ export class RenderPipeline {
           durationMs: Date.now() - startedAt,
         },
       });
+
+      // A failed render still consumed a browser and a slot in the pool, so it
+      // is metered — separately, so a caller can see that the failures are
+      // theirs rather than a mystery in the bill.
+      await this.usage.recordRender(orgId, { pages: 0, bytes: 0, failed: true });
 
       throw error;
     }

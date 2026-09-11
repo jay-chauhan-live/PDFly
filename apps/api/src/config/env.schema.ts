@@ -40,10 +40,18 @@ export const envSchema = z.object({
   // Signed download URLs are short-lived; never a public bucket (PLAN §11).
   DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().min(30).default(900),
   /**
-   * Phase 1 only. Real API tokens arrive in Phase 4; until then a single
-   * static key stands in, scoped to the seeded development organization.
+   * PLAN §6. Per credential for authenticated calls; the tighter budget is
+   * per IP on the public auth routes, where the thing being rationed is
+   * password guesses rather than renders.
    */
-  DEV_API_KEY: z.string().min(8),
+  RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(120),
+  AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(10),
+  /** How long a retried render may reuse its original result (PLAN §6). */
+  IDEMPOTENCY_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .default(24 * 60 * 60),
 
   JWT_ACCESS_SECRET: z.string().min(16, 'JWT_ACCESS_SECRET must be at least 16 characters'),
   // PLAN §5: short-lived access token, long-lived rotating refresh token.

@@ -202,7 +202,12 @@ describe('DocumentsService.downloadUrl', () => {
     const page = await service.list(orgId, { status: 'failed' });
     const id = (page.data[0] as { id: string }).id;
 
-    await expect(service.downloadUrl(orgId, id)).rejects.toMatchObject({ code: 'not_found' });
+    // 409 with a matching code: the document exists, it just has no file.
+    // "not found" would send the caller looking for a different mistake.
+    await expect(service.downloadUrl(orgId, id)).rejects.toMatchObject({
+      code: 'conflict',
+      status: 409,
+    });
   });
 });
 

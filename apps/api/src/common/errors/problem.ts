@@ -9,10 +9,14 @@ export type ProblemCode =
   | 'asset_blocked'
   | 'payload_too_large'
   | 'quota_exceeded'
+  | 'rate_limited'
+  | 'idempotency_conflict'
   | 'renderer_unavailable'
   | 'service_unavailable'
   | 'unauthorized'
+  | 'forbidden'
   | 'not_found'
+  | 'conflict'
   | 'internal_error';
 
 export class ProblemError extends Error {

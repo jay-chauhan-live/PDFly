@@ -94,7 +94,7 @@ export class AuthService {
     const existing = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
 
     if (existing) {
-      throw new ProblemError('invalid_request', 409, 'An account with that email already exists');
+      throw new ProblemError('conflict', 409, 'An account with that email already exists');
     }
 
     const passwordHash = await this.passwords.hash(dto.password);

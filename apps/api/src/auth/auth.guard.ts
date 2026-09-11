@@ -1,41 +1,27 @@
 import { Injectable, type CanActivate, type ExecutionContext } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
-import { timingSafeEqual } from 'node:crypto';
 import type { Request } from 'express';
 import { ProblemError } from '../common/errors/problem.js';
-import { PrismaService } from '../prisma/prisma.service.js';
+import { TokensService } from '../tokens/tokens.service.js';
+import { REQUIRED_SCOPES, type Scope } from '../tokens/scopes.js';
 import { IS_PUBLIC } from './public.decorator.js';
-import type { Env } from '../config/env.schema.js';
 import type { AccessTokenClaims } from './auth.service.js';
 import type { RequestContext } from './request-context.js';
-
-const DEV_ORG_SLUG = 'development';
-
-function safeEqual(a: string, b: string): boolean {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  if (left.length !== right.length) return false;
-  return timingSafeEqual(left, right);
-}
 
 /**
  * The single place where a credential becomes a request context (PLAN §5).
  *
- * Two credential types, one outcome: a dashboard access JWT or — until Phase 4
- * replaces it — the static development API key. Everything downstream reads
- * `request.ctx` and cannot tell which was used.
+ * Two credential types, one outcome: a dashboard access JWT or an API token.
+ * Everything downstream reads `request.ctx` and cannot tell which was used —
+ * except where it genuinely matters, like attributing a render to a person.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
-  private cachedDevOrgId: string | null = null;
-
   constructor(
     private readonly reflector: Reflector,
-    private readonly config: ConfigService<Env, true>,
     private readonly jwt: JwtService,
-    private readonly prisma: PrismaService,
+    private readonly tokens: TokensService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -53,11 +39,14 @@ export class AuthGuard implements CanActivate {
       throw new ProblemError('unauthorized', 401, 'Authentication is required');
     }
 
-    // A JWT has three dot-separated segments; anything else is an API key.
-    request.ctx =
+    // A JWT has three dot-separated segments; anything else is an API token.
+    const ctx =
       presented.split('.').length === 3
         ? await this.fromAccessToken(presented)
-        : await this.fromApiKey(presented);
+        : await this.tokens.authenticate(presented);
+
+    this.assertScopes(context, ctx);
+    request.ctx = ctx;
 
     return true;
   }
@@ -82,36 +71,27 @@ export class AuthGuard implements CanActivate {
     return { orgId: claims.orgId, userId: claims.sub, scopes: claims.scopes };
   }
 
-  private async fromApiKey(key: string): Promise<RequestContext> {
-    const expected = this.config.get('DEV_API_KEY', { infer: true });
+  /**
+   * 403, not 401: the credential is genuine and re-authenticating would not
+   * help. What is missing is authority, and the response says which.
+   */
+  private assertScopes(context: ExecutionContext, ctx: RequestContext): void {
+    const required = this.reflector.getAllAndOverride<Scope[]>(REQUIRED_SCOPES, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
 
-    if (!safeEqual(key, expected)) {
-      throw new ProblemError('unauthorized', 401, 'API key is invalid');
-    }
+    if (!required?.length) return;
 
-    return {
-      orgId: await this.resolveDevOrgId(),
-      scopes: ['pdf:render', 'documents:read', 'documents:delete'],
-    };
-  }
+    const missing = required.filter((scope) => !ctx.scopes.includes(scope));
 
-  private async resolveDevOrgId(): Promise<string> {
-    if (this.cachedDevOrgId) return this.cachedDevOrgId;
-
-    const org = await this.prisma.organization.findUnique({
-      where: { slug: DEV_ORG_SLUG },
-      select: { id: true },
-    });
-
-    if (!org) {
+    if (missing.length > 0) {
       throw new ProblemError(
-        'internal_error',
-        500,
-        'Development organization is missing — run `pnpm db:seed`',
+        'forbidden',
+        403,
+        `This credential is missing the ${missing.join(', ')} scope${missing.length > 1 ? 's' : ''}`,
+        { requiredScopes: required },
       );
     }
-
-    this.cachedDevOrgId = org.id;
-    return org.id;
   }
 }
