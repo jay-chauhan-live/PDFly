@@ -171,9 +171,56 @@ export interface RenderOptions {
   javascript?: boolean;
 }
 
+export const WATERMARK_POSITIONS = [
+  'top-left',
+  'top',
+  'top-right',
+  'left',
+  'center',
+  'right',
+  'bottom-left',
+  'bottom',
+  'bottom-right',
+] as const;
+
+export type WatermarkPosition = (typeof WATERMARK_POSITIONS)[number];
+
+export interface Watermark {
+  type: 'text' | 'image';
+  text?: string;
+  /** PNG or JPEG as a data URI or raw base64. */
+  imageBase64?: string;
+  opacity?: number;
+  rotation?: number;
+  fontSize?: number;
+  scale?: number;
+  color?: string;
+  position?: WatermarkPosition;
+  /** `all`, `first`, `last`, or a list like `1-3,7`. */
+  pages?: string;
+}
+
+export interface Permissions {
+  print?: boolean;
+  highResolutionPrint?: boolean;
+  modify?: boolean;
+  copy?: boolean;
+  annotate?: boolean;
+  fillForms?: boolean;
+  assemble?: boolean;
+}
+
+export interface Protection {
+  userPassword?: string;
+  ownerPassword?: string;
+  permissions?: Permissions;
+}
+
 export interface RenderRequest {
   html: string;
   options?: RenderOptions;
+  watermark?: Watermark;
+  protection?: Protection;
   title?: string;
   filename?: string;
   output?: 'url' | 'binary' | 'base64';
@@ -193,14 +240,14 @@ export interface DocumentSummary {
   errorCode: string | null;
   createdAt: string;
   expiresAt: string | null;
+  isEncrypted: boolean;
+  hasWatermark: boolean;
   creator: { id: string; name: string; email: string } | null;
 }
 
 export interface DocumentDetail extends DocumentSummary {
-  optionsJson: RenderOptions | null;
+  optionsJson: (RenderOptions & { watermark?: Watermark; protection?: unknown }) | null;
   errorMessage: string | null;
-  isEncrypted: boolean;
-  hasWatermark: boolean;
 }
 
 export interface DocumentPage {

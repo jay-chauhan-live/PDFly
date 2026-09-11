@@ -17,6 +17,10 @@ const SUMMARY_SELECT = {
   errorCode: true,
   createdAt: true,
   expiresAt: true,
+  // Cheap booleans the list view needs to show a lock or a stamp without
+  // fetching each document's full record.
+  isEncrypted: true,
+  hasWatermark: true,
   creator: { select: { id: true, name: true, email: true } },
 } as const;
 
@@ -24,8 +28,6 @@ const DETAIL_SELECT = {
   ...SUMMARY_SELECT,
   optionsJson: true,
   errorMessage: true,
-  isEncrypted: true,
-  hasWatermark: true,
 } as const;
 
 export interface Page<T> {

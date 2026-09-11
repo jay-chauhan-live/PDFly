@@ -7,11 +7,11 @@ The build plan it was written against (`docs/PLAN.md`) is kept locally and is
 not published; the `PLAN §n` citations throughout the code refer to its
 sections.
 
-**Status: Phase 4 (API tokens and quotas) complete.** A service you could point a
-customer at: scoped API tokens, per-credential rate limits, idempotent renders,
-usage metering, and a dashboard that shows what it all cost. No watermarking or
-encryption yet, and no email — verification and password reset wait for SMTP in
-Phase 6.
+**Status: Phase 5 (protection and watermarking) complete.** The feature set the
+service exists for: AES-256 password protection with individual permission bits,
+text and image watermarks stamped on every page, and both wired into the
+playground. No email yet — verification and password reset wait for SMTP in
+Phase 6, along with async rendering and webhooks.
 
 ## Layout
 
@@ -95,8 +95,8 @@ API token has nobody, so it is marked `api`.
 ## Endpoints so far
 
 ```
-POST   /v1/pdf                 render, store, record. url | binary | base64
-POST   /v1/pdf/preview         render and return; records and stores nothing
+POST   /v1/pdf                 render, watermark, encrypt, store, record
+POST   /v1/pdf/preview         render and stamp; never encrypts, stores nothing
 GET    /v1/documents           list — search, status, source, date, keyset paging
 GET    /v1/documents/:id       metadata and the options it was rendered with
 GET    /v1/documents/:id/file  short-lived signed download URL
@@ -167,6 +167,30 @@ hand-written fake cannot reproduce.
 - **Route protection in the dashboard is UX, not security.** The refresh cookie
   is scoped to the api's `/v1/auth` path, so Next's server never sees it and
   middleware could not read it. Every endpoint enforces auth itself.
+- **The order of the pipeline is not negotiable:** render, watermark, encrypt,
+  store. An encrypted PDF cannot be stamped, and Chromium cannot produce an
+  encrypted one in the first place — which is exactly why steps three and four
+  live outside the browser.
+- **Watermarks are stamped, not injected.** A CSS overlay before rendering is
+  cheaper, but it sits inside the caller's document where their styles can
+  override it, and `position: fixed` repeating on every printed page is
+  unreliable across Chromium versions. Stamping with pdf-lib afterwards is
+  deterministic and covers pages the HTML never anticipated.
+- **qpdf's arguments travel over stdin, never argv.** The process table is
+  readable by every other process on the host, so a password passed as a
+  command-line argument is a password disclosed. `qpdf @-` reads its arguments
+  from standard input; a test asserts that nothing but `@-` ever reaches argv.
+- **An omitted owner password is generated and thrown away.** Leaving it unset
+  makes the permission bits trivially removable, and qpdf refuses the
+  combination outright. Nobody, including us, can lift the restrictions after
+  the fact — which is the honest reading of "restrict this document".
+- **Passwords are never stored** (PLAN §3). `options_json` records
+  `hasUserPassword: true` and the permission bits, never the values, and it is
+  built by naming what goes in rather than by deleting what must not — so a
+  password-shaped field added later is excluded by default.
+  `src/pdf/password-hygiene.spec.ts` is the audit: it renders with sentinel
+  passwords and checks the document row, the recorded options, the stored
+  object, the failure path and the logger's redaction list.
 - **Playground previews are deliberately not documents.** The editor re-renders
   on a debounce as you type; persisting each of those would bury the real
   history and fill object storage with drafts. `POST /v1/pdf/preview` renders

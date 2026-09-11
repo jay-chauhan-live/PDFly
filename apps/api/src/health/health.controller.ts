@@ -11,6 +11,7 @@ import { Public } from '../auth/public.decorator.js';
 import { SkipRateLimit } from '../ratelimit/rate-limit.guard.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { REDIS_CLIENT } from '../redis/redis.module.js';
+import { EncryptionService } from '../protection/encryption.service.js';
 import { RendererClient } from '../renderer/renderer.client.js';
 
 /**
@@ -28,6 +29,7 @@ export class HealthController {
     private readonly prisma: PrismaService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly renderer: RendererClient,
+    private readonly encryption: EncryptionService,
   ) {}
 
   /** Liveness: is the process up? Deliberately checks no dependencies. */
@@ -44,6 +46,7 @@ export class HealthController {
       () => this.checkPostgres(),
       () => this.checkRedis(),
       () => this.checkRenderer(),
+      () => this.checkQpdf(),
     ]);
   }
 
@@ -55,6 +58,19 @@ export class HealthController {
     } catch (error) {
       return check.down({ message: (error as Error).message });
     }
+  }
+
+  /**
+   * qpdf is an external binary, so its absence is a deployment fault rather
+   * than a code one — and it only shows up when someone asks for a password,
+   * long after the container started. Surfacing it here makes it a startup
+   * problem instead of a customer's problem.
+   */
+  private async checkQpdf(): Promise<HealthIndicatorResult> {
+    const check = this.indicator.check('qpdf');
+    return (await this.encryption.isAvailable())
+      ? check.up()
+      : check.down({ message: 'qpdf is not on PATH; password protection will fail' });
   }
 
   private async checkRenderer(): Promise<HealthIndicatorResult> {

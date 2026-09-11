@@ -51,6 +51,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # qpdf applies PDF encryption (PLAN §3). It is an external binary, not an
+      # npm dependency, so CI has to install it the same way a deployment does.
+      - name: Install qpdf
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qpdf
+
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v5

@@ -4,6 +4,8 @@ import { PDFDocument } from 'pdf-lib';
 import { ProblemError } from '../common/errors/problem.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RendererClient } from '../renderer/renderer.client.js';
+import { EncryptionService } from '../protection/encryption.service.js';
+import { WatermarkService } from '../protection/watermark.service.js';
 import { StorageService } from '../storage/storage.service.js';
 import { UsageService } from '../usage/usage.service.js';
 import type { Env } from '../config/env.schema.js';
@@ -51,6 +53,8 @@ export class RenderPipeline {
   constructor(
     private readonly prisma: PrismaService,
     private readonly renderer: RendererClient,
+    private readonly watermarks: WatermarkService,
+    private readonly encryption: EncryptionService,
     private readonly storage: StorageService,
     private readonly usage: UsageService,
     private readonly config: ConfigService<Env, true>,
@@ -71,10 +75,17 @@ export class RenderPipeline {
     const startedAt = Date.now();
     const rendered = await this.renderer.render({ html: dto.html, ...(dto.options ?? {}) });
 
+    // Stamped but never encrypted: an encrypted preview would prompt for a
+    // password in the viewer, which is not a preview of anything useful. The
+    // watermark is the part worth seeing before committing to a render.
+    const stamped = dto.watermark
+      ? await this.watermarks.apply(rendered.pdf, dto.watermark)
+      : rendered.pdf;
+
     return {
-      pdf: rendered.pdf,
-      pageCount: await this.countPages(rendered.pdf),
-      byteSize: rendered.pdf.byteLength,
+      pdf: stamped,
+      pageCount: await this.countPages(stamped),
+      byteSize: stamped.byteLength,
       durationMs: Date.now() - startedAt,
     };
   }
@@ -93,10 +104,11 @@ export class RenderPipeline {
         source: by.source,
         status: 'rendering',
         title: dto.title ?? null,
-        // Passwords are stripped before anything is persisted (PLAN §3, §4).
-        // Phase 1 has no protection block yet; when Phase 5 adds one, it must
-        // not reach this column.
-        optionsJson: JSON.parse(JSON.stringify(options)) as object,
+        // Reproducibility without the secrets: the settings are recorded, the
+        // passwords are not (PLAN §3, §4).
+        optionsJson: reproducibleOptions(dto),
+        isEncrypted: dto.protection !== undefined,
+        hasWatermark: dto.watermark !== undefined,
         expiresAt: this.expiryDate(),
       },
       select: { id: true },
@@ -104,10 +116,23 @@ export class RenderPipeline {
 
     try {
       const rendered = await this.renderer.render({ html: dto.html, ...options });
+
+      // Page count comes from the rendered document, before encryption makes
+      // it unreadable to us as well as to everyone else.
       const pageCount = await this.countPages(rendered.pdf);
 
+      // Order is not negotiable (PLAN §3): an encrypted PDF cannot be stamped,
+      // so the watermark goes on first and encryption is always last.
+      const stamped = dto.watermark
+        ? await this.watermarks.apply(rendered.pdf, dto.watermark)
+        : rendered.pdf;
+
+      const final = dto.protection
+        ? await this.encryption.encrypt(stamped, dto.protection)
+        : stamped;
+
       const storageKey = this.storage.buildKey(orgId, document.id);
-      await this.storage.putPdf(storageKey, rendered.pdf);
+      await this.storage.putPdf(storageKey, final);
 
       const durationMs = Date.now() - startedAt;
 
@@ -117,27 +142,27 @@ export class RenderPipeline {
           status: 'completed',
           storageKey,
           pageCount,
-          byteSize: rendered.pdf.byteLength,
+          byteSize: final.byteLength,
           durationMs,
         },
       });
 
       await this.usage.recordRender(orgId, {
         pages: pageCount,
-        bytes: rendered.pdf.byteLength,
+        bytes: final.byteLength,
         failed: false,
       });
 
       this.logger.log(
-        `rendered ${document.id}: ${pageCount} page(s), ${rendered.pdf.byteLength} bytes, ${durationMs}ms`,
+        `rendered ${document.id}: ${pageCount} page(s), ${final.byteLength} bytes, ${durationMs}ms`,
       );
 
       return {
         documentId: document.id,
-        pdf: rendered.pdf,
+        pdf: final,
         storageKey,
         pageCount,
-        byteSize: rendered.pdf.byteLength,
+        byteSize: final.byteLength,
         durationMs,
         filename: dto.filename ?? `${document.id}.pdf`,
       };
@@ -193,4 +218,33 @@ export class RenderPipeline {
       return 0;
     }
   }
+}
+
+/**
+ * The settings a render can be reproduced from, with every secret removed.
+ *
+ * Built by naming what goes in rather than by deleting what must not: a new
+ * password-shaped field added to the DTO later is excluded by default, which
+ * is the failure mode you want. The watermark keeps its placement but drops
+ * any embedded image, which would bloat the row for no reproducibility gain.
+ */
+function reproducibleOptions(dto: RenderPdfDto): object {
+  const { imageBase64: _image, ...watermark } = dto.watermark ?? {};
+
+  return JSON.parse(
+    JSON.stringify({
+      ...(dto.options ?? {}),
+      ...(dto.watermark ? { watermark: { ...watermark, ...(_image ? { image: true } : {}) } } : {}),
+      ...(dto.protection
+        ? {
+            protection: {
+              // Recorded as facts about the document, never as values.
+              hasUserPassword: dto.protection.userPassword !== undefined,
+              hasOwnerPassword: dto.protection.ownerPassword !== undefined,
+              permissions: dto.protection.permissions ?? {},
+            },
+          }
+        : {}),
+    }),
+  ) as object;
 }

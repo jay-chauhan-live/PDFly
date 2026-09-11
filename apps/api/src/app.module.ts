@@ -9,6 +9,7 @@ import { AuthGuard } from './auth/auth.guard.js';
 import { RateLimitGuard } from './ratelimit/rate-limit.guard.js';
 import { RateLimitModule } from './ratelimit/rate-limit.module.js';
 import { UsageModule } from './usage/usage.module.js';
+import { ProtectionModule } from './protection/protection.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
 import { TokensModule } from './tokens/tokens.module.js';
@@ -43,6 +44,7 @@ import { StorageModule } from './storage/storage.module.js';
     RedisModule,
     RateLimitModule,
     UsageModule,
+    ProtectionModule,
     TokensModule,
     AuthModule,
     StorageModule,

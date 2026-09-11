@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CurlSnippet } from '@/components/playground/curl-snippet';
 import { OptionsPanel } from '@/components/playground/options-panel';
+import { ProtectionPanel, WatermarkPanel } from '@/components/playground/protection-panel';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,8 +15,10 @@ import {
   getDocument,
   previewPdf,
   renderDocument,
+  type Protection,
   type RenderOptions,
   type RenderRequest,
+  type Watermark,
 } from '@/lib/api';
 
 // Monaco touches `window` at module scope and is large; it has no business in
@@ -81,6 +84,8 @@ export default function PlaygroundPage() {
   const [html, setHtml] = useState(STARTER_HTML);
   const [options, setOptions] = useState<RenderOptions>({ format: 'A4', printBackground: true });
   const [title, setTitle] = useState('Invoice 001');
+  const [watermark, setWatermark] = useState<Watermark | undefined>();
+  const [protection, setProtection] = useState<Protection | undefined>();
   const [showOptions, setShowOptions] = useState(true);
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -115,6 +120,8 @@ export default function PlaygroundPage() {
   const request: RenderRequest = {
     html,
     options,
+    ...(watermark ? { watermark } : {}),
+    ...(protection ? { protection } : {}),
     ...(title.trim() ? { title: title.trim() } : {}),
   };
 
@@ -140,7 +147,9 @@ export default function PlaygroundPage() {
       setRendering(true);
       setError(null);
 
-      previewPdf({ html, options }, controller.signal)
+      // The watermark is previewed; the encryption is not. An encrypted
+      // preview would just prompt for a password in the viewer.
+      previewPdf({ html, options, ...(watermark ? { watermark } : {}) }, controller.signal)
         .then((result) => {
           replacePreview(URL.createObjectURL(result.blob));
           setStats({ pageCount: result.pageCount, durationMs: result.durationMs });
@@ -158,7 +167,7 @@ export default function PlaygroundPage() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [html, options, replacePreview]);
+  }, [html, options, watermark, replacePreview]);
 
   async function save(): Promise<void> {
     setSaving(true);
@@ -236,6 +245,7 @@ export default function PlaygroundPage() {
                 : stats
                   ? `${stats.pageCount} page${stats.pageCount === 1 ? '' : 's'} · ${stats.durationMs}ms`
                   : ''}
+              {protection && !rendering ? ' · unencrypted preview' : ''}
             </span>
           </div>
 
@@ -284,8 +294,13 @@ export default function PlaygroundPage() {
       </div>
 
       {showOptions ? (
-        <div className="rounded-lg border p-4">
+        <div className="grid gap-6 rounded-lg border p-4 lg:grid-cols-2">
           <OptionsPanel options={options} onChange={setOptions} />
+
+          <div className="flex flex-col gap-5">
+            <WatermarkPanel watermark={watermark} onChange={setWatermark} />
+            <ProtectionPanel protection={protection} onChange={setProtection} />
+          </div>
         </div>
       ) : null}
     </div>

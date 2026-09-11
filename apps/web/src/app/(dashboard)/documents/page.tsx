@@ -1,6 +1,6 @@
 'use client';
 
-import { Download, FileText, Loader2, Search, Trash2 } from 'lucide-react';
+import { Download, Droplet, FileText, Loader2, Lock, Search, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { StatusBadge } from '@/components/documents/status-badge';
@@ -254,13 +254,27 @@ export default function DocumentsPage() {
             ) : (
               rows.map((row) => (
                 <tr key={row.id} className="hover:bg-muted/30 border-t">
-                  <td className="max-w-64 truncate px-4 py-2.5">
-                    <Link
-                      href={`/documents/${row.id}`}
-                      className="font-medium underline-offset-4 hover:underline"
-                    >
-                      {row.title ?? <span className="text-muted-foreground">Untitled</span>}
-                    </Link>
+                  <td className="max-w-64 px-4 py-2.5">
+                    <div className="flex items-center gap-1.5">
+                      <Link
+                        href={`/documents/${row.id}`}
+                        className="truncate font-medium underline-offset-4 hover:underline"
+                      >
+                        {row.title ?? <span className="text-muted-foreground">Untitled</span>}
+                      </Link>
+                      {row.isEncrypted ? (
+                        <Lock
+                          className="text-muted-foreground size-3.5 shrink-0"
+                          aria-label="Password protected"
+                        />
+                      ) : null}
+                      {row.hasWatermark ? (
+                        <Droplet
+                          className="text-muted-foreground size-3.5 shrink-0"
+                          aria-label="Watermarked"
+                        />
+                      ) : null}
+                    </div>
                   </td>
                   <td className="px-4 py-2.5">
                     <StatusBadge status={row.status} />
