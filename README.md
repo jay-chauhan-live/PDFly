@@ -1,7 +1,11 @@
 # PDFly
 
-Self-hosted, multi-tenant HTML-to-PDF service. See [docs/PLAN.md](docs/PLAN.md) for
-the full design; this README covers getting it running.
+Self-hosted, multi-tenant HTML-to-PDF service. This README covers getting it
+running.
+
+The build plan it was written against (`docs/PLAN.md`) is kept locally and is
+not published; the `PLAN §n` citations throughout the code refer to its
+sections.
 
 **Status: Phase 4 (API tokens and quotas) complete.** A service you could point a
 customer at: scoped API tokens, per-credential rate limits, idempotent renders,
@@ -16,7 +20,6 @@ apps/api      NestJS — config, logging, health, Prisma, auth, rendering, docum
 apps/renderer Isolated Playwright/Chromium pool. HTML in, raw PDF out. No DB access.
 apps/web      Next.js dashboard — auth, playground, history, tokens, usage.
 packages/    Shared code (empty until there is something genuinely shared).
-docs/PLAN.md The build plan.
 ```
 
 `worker` and the BullMQ queue (PLAN §2) arrive with async rendering in Phase 6.
@@ -26,6 +29,9 @@ docs/PLAN.md The build plan.
 - Node 24 (see `.nvmrc`)
 - pnpm 11
 - Docker, for Postgres, Redis and MinIO
+- `qpdf`, for password protection — `brew install qpdf` or `apt install qpdf`.
+  Everything else works without it; `/health` reports it as down so a missing
+  binary is a startup problem rather than a customer's problem.
 
 ## Getting started
 
