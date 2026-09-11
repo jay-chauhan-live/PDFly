@@ -53,12 +53,43 @@ export const envSchema = z.object({
     .min(60)
     .default(24 * 60 * 60),
 
+  /**
+   * Async render workers in this process. 0 disables consumption entirely,
+   * which is how you would run an api instance that only enqueues once the
+   * worker moves to its own deployable (PLAN §2).
+   */
+  QUEUE_CONCURRENCY: z.coerce.number().int().min(0).default(2),
+  /** HMAC key for outgoing webhook signatures (PLAN §6). */
+  WEBHOOK_SIGNING_SECRET: z
+    .string()
+    .min(16, 'WEBHOOK_SIGNING_SECRET must be at least 16 characters'),
+  /**
+   * Webhooks to private addresses are an SSRF hole on the process holding the
+   * database credentials (PLAN §11). Allowed in development, where the
+   * receiver is usually localhost, and never by default anywhere else.
+   */
+  WEBHOOK_ALLOW_PRIVATE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+
   JWT_ACCESS_SECRET: z.string().min(16, 'JWT_ACCESS_SECRET must be at least 16 characters'),
   // PLAN §5: short-lived access token, long-lived rotating refresh token.
   JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().min(60).default(900),
   // Refresh tokens are opaque random values held in Redis, not JWTs, so
   // there is no second signing secret to configure.
   REFRESH_TTL_DAYS: z.coerce.number().int().min(1).default(30),
+
+  /**
+   * Fallback transport for organizations that have not configured SMTP yet
+   * (PLAN §7). Without it a fresh signup cannot receive the email that would
+   * let them sign in and configure one.
+   */
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+  SMTP_USERNAME: z.string().optional(),
+  SMTP_PASSWORD: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
 
   // AES-256-GCM key for smtp_configs.password_encrypted — 32 bytes, base64.
   ENCRYPTION_KEY: z

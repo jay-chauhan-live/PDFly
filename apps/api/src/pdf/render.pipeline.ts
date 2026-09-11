@@ -90,29 +90,53 @@ export class RenderPipeline {
     };
   }
 
-  async run(dto: RenderPdfDto, by: RenderAttribution): Promise<RenderOutcome> {
+  /**
+   * Renders, stores and records, as one unit.
+   *
+   * `existingDocumentId` is how the async path works: the request handler
+   * creates the row so the caller gets an id in its 202, and the worker
+   * finishes that same row rather than creating a second one nobody is
+   * holding a reference to.
+   */
+  async run(
+    dto: RenderPdfDto,
+    by: RenderAttribution,
+    existingDocumentId?: string,
+  ): Promise<RenderOutcome> {
     this.assertWithinSizeLimit(dto.html);
 
     const startedAt = Date.now();
     const options = dto.options ?? {};
     const { orgId } = by;
 
-    const document = await this.prisma.document.create({
-      data: {
-        orgId,
-        createdBy: by.userId ?? null,
-        source: by.source,
-        status: 'rendering',
-        title: dto.title ?? null,
-        // Reproducibility without the secrets: the settings are recorded, the
-        // passwords are not (PLAN §3, §4).
-        optionsJson: reproducibleOptions(dto),
-        isEncrypted: dto.protection !== undefined,
-        hasWatermark: dto.watermark !== undefined,
-        expiresAt: this.expiryDate(),
-      },
-      select: { id: true },
-    });
+    const document = existingDocumentId
+      ? await this.prisma.document.update({
+          where: { id: existingDocumentId },
+          // The protection block is only known now, on the worker, so the two
+          // flags are set here rather than at enqueue time.
+          data: {
+            status: 'rendering',
+            isEncrypted: dto.protection !== undefined,
+            hasWatermark: dto.watermark !== undefined,
+          },
+          select: { id: true },
+        })
+      : await this.prisma.document.create({
+          data: {
+            orgId,
+            createdBy: by.userId ?? null,
+            source: by.source,
+            status: 'rendering',
+            title: dto.title ?? null,
+            // Reproducibility without the secrets: the settings are recorded,
+            // the passwords are not (PLAN §3, §4).
+            optionsJson: reproducibleOptions(dto),
+            isEncrypted: dto.protection !== undefined,
+            hasWatermark: dto.watermark !== undefined,
+            expiresAt: this.expiryDate(),
+          },
+          select: { id: true },
+        });
 
     try {
       const rendered = await this.renderer.render({ html: dto.html, ...options });
@@ -187,6 +211,31 @@ export class RenderPipeline {
 
       throw error;
     }
+  }
+
+  /**
+   * Records the intent to render, before anything has been rendered. The
+   * async path needs a document id to hand back in its 202.
+   */
+  async reserve(dto: RenderPdfDto, by: RenderAttribution): Promise<string> {
+    this.assertWithinSizeLimit(dto.html);
+
+    const document = await this.prisma.document.create({
+      data: {
+        orgId: by.orgId,
+        createdBy: by.userId ?? null,
+        source: by.source,
+        status: 'queued',
+        title: dto.title ?? null,
+        optionsJson: reproducibleOptions(dto),
+        isEncrypted: dto.protection !== undefined,
+        hasWatermark: dto.watermark !== undefined,
+        expiresAt: this.expiryDate(),
+      },
+      select: { id: true },
+    });
+
+    return document.id;
   }
 
   private assertWithinSizeLimit(html: string): void {

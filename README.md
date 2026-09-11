@@ -7,22 +7,24 @@ The build plan it was written against (`docs/PLAN.md`) is kept locally and is
 not published; the `PLAN §n` citations throughout the code refer to its
 sections.
 
-**Status: Phase 5 (protection and watermarking) complete.** The feature set the
-service exists for: AES-256 password protection with individual permission bits,
-text and image watermarks stamped on every page, and both wired into the
-playground. No email yet — verification and password reset wait for SMTP in
-Phase 6, along with async rendering and webhooks.
+**Status: Phase 6 (async, webhooks and SMTP) complete.** Renders can now happen
+off the request: enqueue and poll, or be told by a signed webhook. Organizations
+configure their own SMTP and get alerted when a render fails. What remains is
+Phase 7 — the egress proxy and container hardening, a retention job, and the
+help content.
 
 ## Layout
 
 ```
-apps/api      NestJS — config, logging, health, Prisma, auth, rendering, documents.
+apps/api      NestJS — auth, rendering, documents, tokens, queue worker, mail.
 apps/renderer Isolated Playwright/Chromium pool. HTML in, raw PDF out. No DB access.
 apps/web      Next.js dashboard — auth, playground, history, tokens, usage.
 packages/    Shared code (empty until there is something genuinely shared).
 ```
 
-`worker` and the BullMQ queue (PLAN §2) arrive with async rendering in Phase 6.
+The BullMQ queue is in place; its worker runs inside `apps/api` rather than as
+the separate deployable PLAN §2 describes. That is deliberate — see the note at
+the bottom of this file.
 
 ## Prerequisites
 
@@ -101,6 +103,9 @@ GET    /v1/documents           list — search, status, source, date, keyset pag
 GET    /v1/documents/:id       metadata and the options it was rendered with
 GET    /v1/documents/:id/file  short-lived signed download URL
 DELETE /v1/documents/:id       removes the row and the stored object
+POST   /v1/pdf/async           enqueue, 202 with a job id
+GET    /v1/jobs/:id            status, and the result URL once complete
+GET    /v1/smtp                POST /v1/smtp   PATCH, DELETE, POST /:id/test
 GET    /v1/usage               today, month to date, a daily series, durations
 GET    /v1/tokens              POST /v1/tokens   DELETE /v1/tokens/:id
 POST   /v1/auth/{register,login,refresh,logout}   GET /v1/auth/me
@@ -167,6 +172,35 @@ hand-written fake cannot reproduce.
 - **Route protection in the dashboard is UX, not security.** The refresh cookie
   is scoped to the api's `/v1/auth` path, so Next's server never sees it and
   middleware could not read it. Every endpoint enforces auth itself.
+- **The queue worker runs inside the api process**, not as the separate
+  deployable PLAN §2 describes. The isolation that matters for security is the
+  renderer's — that is the process executing attacker-supplied markup, and it
+  is already separate with no database credentials. Separating the worker buys
+  independent scaling and crash isolation, both worth having and neither worth
+  blocking async rendering on. `QUEUE_CONCURRENCY=0` runs an api instance that
+  enqueues without consuming, which is the shape the split will take.
+- **A queued render never carries its password.** The synchronous path keeps it
+  in memory and is done; a job payload goes to Redis, where a plaintext
+  password would sit in a queue and survive in the completed-job record. The
+  protection block is encrypted with the service key under a short-TTL key, and
+  the job carries an opaque id. Taking it is a single `GETDEL`, so a replayed
+  job fails loudly rather than quietly rendering without protection.
+- **Webhook signatures cover a timestamp as well as the body.** Signing the
+  body alone makes any captured request replayable forever. `x-pdfly-signature`
+  is `v1=<hmac-sha256 of "<timestamp>.<body>">`.
+- **A webhook URL is a caller-supplied address this server will fetch** — the
+  same shape of hole as an SSRF in the renderer, on the process that does hold
+  database credentials. Destinations are checked against the private ranges in
+  PLAN §11 at submission time, including IPv4-mapped IPv6 literals.
+  `WEBHOOK_ALLOW_PRIVATE=true` relaxes it for local development only. This is a
+  first pass: a public hostname can still resolve to a private address at
+  delivery time, which is what the Phase 7 egress proxy closes.
+- **SMTP passwords are encrypted with AES-256-GCM** and never returned — the
+  API answers with a masked placeholder so the UI can tell one is set. GCM
+  rather than CBC because it authenticates: tampered ciphertext fails to
+  decrypt instead of quietly producing different plaintext. Omitting `password`
+  on an update keeps the stored one, since a form that cannot read it back must
+  still be able to save the rest.
 - **The order of the pipeline is not negotiable:** render, watermark, encrypt,
   store. An encrypted PDF cannot be stamped, and Chromium cannot produce an
   encrypted one in the first place — which is exactly why steps three and four

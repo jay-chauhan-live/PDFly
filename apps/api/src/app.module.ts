@@ -10,6 +10,10 @@ import { RateLimitGuard } from './ratelimit/rate-limit.guard.js';
 import { RateLimitModule } from './ratelimit/rate-limit.module.js';
 import { UsageModule } from './usage/usage.module.js';
 import { ProtectionModule } from './protection/protection.module.js';
+import { CommonModule } from './common/common.module.js';
+import { QueueModule } from './queue/queue.module.js';
+import { WebhooksModule } from './webhooks/webhooks.module.js';
+import { SmtpModule } from './smtp/smtp.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
 import { TokensModule } from './tokens/tokens.module.js';
@@ -40,6 +44,7 @@ import { StorageModule } from './storage/storage.module.js';
     }),
     // Drives the usage flush (PLAN §8).
     ScheduleModule.forRoot(),
+    CommonModule,
     PrismaModule,
     RedisModule,
     RateLimitModule,
@@ -52,6 +57,9 @@ import { StorageModule } from './storage/storage.module.js';
     HealthModule,
     PdfModule,
     DocumentsModule,
+    WebhooksModule,
+    QueueModule,
+    SmtpModule,
   ],
   // Authentication is on by default; routes opt out with @Public() (PLAN §5).
   // Order matters: APP_GUARD providers run in declaration order, and the rate

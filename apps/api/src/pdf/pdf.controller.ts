@@ -7,7 +7,8 @@ import { RequireScopes } from '../tokens/scopes.js';
 import { IdempotencyService } from '../usage/idempotency.service.js';
 import { StorageService } from '../storage/storage.service.js';
 import { RenderPdfDto } from './dto/render-pdf.dto.js';
-import { RenderPipeline, type RenderAttribution } from './render.pipeline.js';
+import { RenderPipeline } from './render.pipeline.js';
+import { attributionFor } from './attribution.js';
 import type { RequestContext } from '../auth/request-context.js';
 
 const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
@@ -183,16 +184,4 @@ export class PdfController {
 
     return key;
   }
-}
-
-/**
- * A dashboard session carries a user; an API token does not. That is the only
- * honest signal for `source`, and it cannot be spoofed by the request body.
- */
-function attributionFor(ctx: RequestContext): RenderAttribution {
-  return {
-    orgId: ctx.orgId,
-    ...(ctx.userId ? { userId: ctx.userId } : {}),
-    source: ctx.userId ? 'ui' : 'api',
-  };
 }

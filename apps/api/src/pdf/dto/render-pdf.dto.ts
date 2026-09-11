@@ -163,6 +163,9 @@ export class RenderPdfDto {
   /** `url` returns JSON with a signed link, `binary` streams the PDF back. */
   @IsOptional() @IsIn(['url', 'binary', 'base64']) output?: 'url' | 'binary' | 'base64';
 
+  /** Async renders only: where to POST the signed completion event (PLAN §6). */
+  @IsOptional() @IsString() @MaxLength(2048) webhookUrl?: string;
+
   @IsOptional() @IsString() @MaxLength(255) filename?: string;
 
   @IsOptional() @IsString() @MaxLength(255) title?: string;

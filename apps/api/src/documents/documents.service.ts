@@ -139,6 +139,20 @@ export class DocumentsService {
     this.logger.log(`deleted document ${document.id}`);
   }
 
+  /** Tracks an async render alongside its document (PLAN §4 `jobs`). */
+  async recordJob(documentId: string, orgId: string, webhookUrl?: string): Promise<void> {
+    await this.prisma.job.create({
+      data: {
+        documentId,
+        orgId,
+        queueJobId: documentId,
+        status: 'queued',
+        webhookUrl: webhookUrl ?? null,
+        webhookStatus: webhookUrl ? 'pending' : null,
+      },
+    });
+  }
+
   private buildWhere(orgId: string, query: ListDocumentsDto): Prisma.DocumentWhereInput {
     const where: Prisma.DocumentWhereInput = { orgId };
 

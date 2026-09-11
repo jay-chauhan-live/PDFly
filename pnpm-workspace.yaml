@@ -12,6 +12,9 @@ allowBuilds:
   esbuild: true
   prisma: true
   unrs-resolver: true
+  # BullMQ's msgpack accelerator. Left off: it is a native build for a speed-up
+  # nobody here can measure, and the pure-JS path is one less thing to compile.
+  msgpackr-extract: false
 
 minimumReleaseAgeExclude:
   - lucide-react@1.44.0
