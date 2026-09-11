@@ -1,0 +1,17 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# Build scripts we deliberately allow. Prisma and swc ship native binaries and
+# do not work without their postinstall step; unrs-resolver backs eslint's
+# module resolution and esbuild backs tsx.
+allowBuilds:
+  '@prisma/engines': true
+  '@swc/core': true
+  esbuild: true
+  prisma: true
+  unrs-resolver: true
+
+minimumReleaseAgeExclude:
+  - lucide-react@1.44.0
+  - zod@4.6.2

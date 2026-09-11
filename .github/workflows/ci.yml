@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Values only need to satisfy the env schema; CI touches a real Postgres and
+  # Redis via the service containers below.
+  DATABASE_URL: postgresql://inkwell:inkwell@localhost:5432/inkwell?schema=public
+  REDIS_URL: redis://localhost:6379
+  S3_ENDPOINT: http://localhost:9000
+  S3_BUCKET: inkwell
+  S3_ACCESS_KEY_ID: inkwell
+  S3_SECRET_ACCESS_KEY: inkwell-dev-secret
+  JWT_ACCESS_SECRET: ci-access-secret-not-a-real-key
+  JWT_REFRESH_SECRET: ci-refresh-secret-not-a-real-key
+  ENCRYPTION_KEY: Y2ktb25seS1ub3QtYS1yZWFsLWtleS0wMDAwMDAwMDA=
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: inkwell
+          POSTGRES_PASSWORD: inkwell
+          POSTGRES_DB: inkwell
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U inkwell -d inkwell"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:8-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Apply migrations
+        run: pnpm --filter @inkwell/api exec prisma migrate deploy
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build

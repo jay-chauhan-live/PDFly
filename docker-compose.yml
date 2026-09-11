@@ -1,0 +1,82 @@
+# Local development infrastructure for Inkwell.
+# Application services (api, web, renderer, worker) run on the host via
+# `pnpm dev` in Phase 0; only backing services live here.
+
+name: inkwell
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-inkwell}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-inkwell}
+      POSTGRES_DB: ${POSTGRES_DB:-inkwell}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      # Postgres 18+ images expect a single mount at /var/lib/postgresql and
+      # place the cluster in a major-version subdirectory beneath it.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-inkwell} -d ${POSTGRES_DB:-inkwell}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    # BullMQ requires noeviction: a maxmemory-evicting Redis will silently
+    # drop job data. Fail loudly instead.
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-inkwell}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-inkwell-dev-secret}
+    ports:
+      - '9000:9000'
+      - '${MINIO_CONSOLE_PORT:-9001}:9001'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # One-shot: creates the bucket so the api never has to bootstrap storage.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      S3_BUCKET: ${S3_BUCKET:-inkwell}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-inkwell}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-inkwell-dev-secret}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 \"$$S3_ACCESS_KEY_ID\" \"$$S3_SECRET_ACCESS_KEY\" &&
+      mc mb --ignore-existing \"local/$$S3_BUCKET\" &&
+      echo 'bucket ready: '\"$$S3_BUCKET\"
+      "
+    restart: 'no'
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

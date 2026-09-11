@@ -1,0 +1,30 @@
+{
+  "name": "inkwell",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Self-hosted, multi-tenant HTML-to-PDF service",
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:reset": "docker compose down -v && docker compose up -d",
+    "db:migrate": "pnpm --filter @inkwell/api exec prisma migrate dev",
+    "db:generate": "pnpm --filter @inkwell/api exec prisma generate",
+    "db:studio": "pnpm --filter @inkwell/api exec prisma studio"
+  },
+  "devDependencies": {
+    "prettier": "3.6.2",
+    "turbo": "2.10.12",
+    "typescript": "6.0.3"
+  }
+}

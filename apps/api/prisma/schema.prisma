@@ -1,0 +1,268 @@
+// Inkwell data model — see docs/PLAN.md §4.
+//
+// Multi-tenant: every tenant-owned row carries `orgId`, and every query path
+// is expected to filter on it. Nothing is global except the enums.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+  // NestJS 12 is ESM-only, so the api package is ESM and so is the client.
+  moduleFormat = "esm"
+}
+
+// Prisma 7 takes the connection URL from prisma.config.ts (CLI) and from the
+// driver adapter (runtime) — it is deliberately absent here.
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Plan {
+  free
+  pro
+  enterprise
+}
+
+enum UserRole {
+  owner
+  admin
+  member
+}
+
+enum ThemePref {
+  system
+  light
+  dark
+}
+
+enum DocumentSource {
+  api
+  ui
+}
+
+enum DocumentStatus {
+  queued
+  rendering
+  completed
+  failed
+  expired
+}
+
+enum JobStatus {
+  queued
+  active
+  completed
+  failed
+}
+
+enum WebhookStatus {
+  pending
+  delivered
+  failed
+  disabled
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String   @unique
+  plan      Plan     @default(free)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  users       User[]
+  apiTokens   ApiToken[]
+  documents   Document[]
+  jobs        Job[]
+  smtpConfigs SmtpConfig[]
+  assets      Asset[]
+  usageDaily  UsageDaily[]
+  auditLog    AuditLogEntry[]
+
+  @@map("organizations")
+}
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  orgId           String    @map("org_id") @db.Uuid
+  email           String    @unique
+  passwordHash    String    @map("password_hash")
+  name            String
+  role            UserRole  @default(member)
+  emailVerifiedAt DateTime? @map("email_verified_at")
+  avatarUrl       String?   @map("avatar_url")
+  themePref       ThemePref @default(system) @map("theme_pref")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  org             Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdTokens   ApiToken[]      @relation("TokenCreatedBy")
+  createdDocuments Document[]     @relation("DocumentCreatedBy")
+  auditEntries    AuditLogEntry[] @relation("AuditActor")
+
+  @@index([orgId])
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// API credentials (§5)
+// ---------------------------------------------------------------------------
+
+model ApiToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  orgId      String    @map("org_id") @db.Uuid
+  name       String
+  // Lookup key. The secret half is never stored — only sha256(full token).
+  prefix     String    @unique
+  tokenHash  String    @map("token_hash")
+  scopes     String[]
+  lastUsedAt DateTime? @map("last_used_at")
+  expiresAt  DateTime? @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdBy  String?   @map("created_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  org     Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  creator User?        @relation("TokenCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@map("api_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+model Document {
+  id           String         @id @default(uuid()) @db.Uuid
+  orgId        String         @map("org_id") @db.Uuid
+  createdBy    String?        @map("created_by") @db.Uuid
+  source       DocumentSource
+  status       DocumentStatus @default(queued)
+  title        String?
+  pageCount    Int?           @map("page_count")
+  byteSize     Int?           @map("byte_size")
+  storageKey   String?        @map("storage_key")
+  isEncrypted  Boolean        @default(false) @map("is_encrypted")
+  hasWatermark Boolean        @default(false) @map("has_watermark")
+  // Render settings for reproducibility — password fields stripped (§4).
+  optionsJson  Json?          @map("options_json")
+  errorCode    String?        @map("error_code")
+  errorMessage String?        @map("error_message")
+  durationMs   Int?           @map("duration_ms")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  expiresAt    DateTime?      @map("expires_at")
+
+  org     Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  creator User?        @relation("DocumentCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  jobs    Job[]
+
+  // Dashboard list view. A GIN index over to_tsvector(title) for search is
+  // added by raw SQL in the migration — Prisma cannot express it.
+  @@index([orgId, createdAt(sort: Desc)])
+  @@index([orgId, status])
+  @@index([expiresAt])
+  @@map("documents")
+}
+
+model Job {
+  id            String         @id @default(uuid()) @db.Uuid
+  documentId    String         @map("document_id") @db.Uuid
+  orgId         String         @map("org_id") @db.Uuid
+  queueJobId    String?        @map("queue_job_id")
+  status        JobStatus      @default(queued)
+  attempts      Int            @default(0)
+  webhookUrl    String?        @map("webhook_url")
+  webhookStatus WebhookStatus? @map("webhook_status")
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  document Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([documentId])
+  @@map("jobs")
+}
+
+model Asset {
+  id         String   @id @default(uuid()) @db.Uuid
+  orgId      String   @map("org_id") @db.Uuid
+  storageKey String   @map("storage_key")
+  filename   String
+  mime       String
+  byteSize   Int      @map("byte_size")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("assets")
+}
+
+// ---------------------------------------------------------------------------
+// Mail (§7)
+// ---------------------------------------------------------------------------
+
+model SmtpConfig {
+  id        String    @id @default(uuid()) @db.Uuid
+  orgId     String    @map("org_id") @db.Uuid
+  name      String
+  host      String
+  port      Int
+  secure    Boolean   @default(true)
+  username  String?
+  // AES-256-GCM, key from the environment — never from the database (§4).
+  passwordEncrypted String? @map("password_encrypted")
+  fromEmail String    @map("from_email")
+  fromName  String?   @map("from_name")
+  isDefault Boolean   @default(false) @map("is_default")
+  verifiedAt DateTime? @map("verified_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  // Exactly one default per org is enforced by a partial unique index added
+  // in raw SQL in the migration.
+  @@index([orgId])
+  @@map("smtp_configs")
+}
+
+// ---------------------------------------------------------------------------
+// Metering and audit
+// ---------------------------------------------------------------------------
+
+model UsageDaily {
+  orgId    String   @map("org_id") @db.Uuid
+  date     DateTime @db.Date
+  renders  Int      @default(0)
+  pages    Int      @default(0)
+  bytes    BigInt   @default(0)
+  failures Int      @default(0)
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@id([orgId, date])
+  @@map("usage_daily")
+}
+
+model AuditLogEntry {
+  id           String   @id @default(uuid()) @db.Uuid
+  orgId        String   @map("org_id") @db.Uuid
+  actorId      String?  @map("actor_id") @db.Uuid
+  action       String
+  target       String?
+  metadataJson Json?    @map("metadata_json")
+  ip           String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  actor User?        @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, createdAt(sort: Desc)])
+  @@map("audit_log")
+}
