@@ -169,6 +169,8 @@ export interface RenderOptions {
   waitUntil?: (typeof WAIT_UNTIL)[number];
   timeoutMs?: number;
   javascript?: boolean;
+  allowExternalAssets?: boolean;
+  assetHostAllowlist?: string[];
 }
 
 export const WATERMARK_POSITIONS = [

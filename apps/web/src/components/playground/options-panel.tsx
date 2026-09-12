@@ -113,6 +113,20 @@ export function OptionsPanel({
           Off by default: every script that runs is code from the document being rendered.
         </p>
 
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox
+            checked={options.allowExternalAssets ?? false}
+            onChange={(event) => set('allowExternalAssets', event.target.checked)}
+          />
+          Allow external assets
+        </label>
+        <p className="text-muted-foreground -mt-1 text-xs">
+          Off by default: images, fonts and stylesheets loaded over the network are blocked, and
+          only inline (<code>data:</code>) or uploaded assets render. Turn this on to fetch remote
+          URLs such as a hosted logo. Private and loopback addresses are always refused; name the
+          hosts you trust with <code>assetHostAllowlist</code> in the API call.
+        </p>
+
         <div className="grid gap-1.5">
           <Label htmlFor="waitUntil">Wait until</Label>
           <Select
