@@ -126,8 +126,9 @@ services:
       retries: 10
     security_opt: [no-new-privileges:true]
 
+  # quay.io, not Docker Hub: MinIO gated its Docker Hub images behind login.
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     restart: unless-stopped
     command: ['server', '/data']
     environment:
@@ -149,7 +150,7 @@ services:
 
   # One-shot: creates the bucket so the api never bootstraps storage itself.
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     depends_on:
       minio: { condition: service_healthy }
     entrypoint: >
