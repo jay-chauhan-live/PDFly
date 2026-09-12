@@ -130,12 +130,7 @@ export class EncryptionService {
     // positional form is used for portability. Newer qpdf still accepts it. An
     // empty user password is a legitimate value (restrict-only, no open
     // password) and survives as an empty token in the @- argument file.
-    const args = [
-      '--encrypt',
-      userPassword,
-      ownerPassword,
-      '256',
-    ];
+    const args = ['--encrypt', userPassword, ownerPassword, '256'];
 
     // Printing is a three-state permission, not a boolean: a document can
     // allow a low-resolution proof print but not a press-quality one.
