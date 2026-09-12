@@ -61,7 +61,11 @@ RUN pnpm --filter=@pdfly/api --legacy deploy --prod /prod/api
 # an image that only exists during a deploy.
 FROM build AS migrate
 WORKDIR /repo/apps/api
-CMD ["pnpm", "exec", "prisma", "migrate", "deploy"]
+# Invoke the Prisma CLI binary directly, not via `pnpm exec` — pnpm 11 runs a
+# dep-status check first and tries to reinstall in a non-TTY container, which
+# removes the very CLI this stage needs. The deps are already in place from the
+# build stage.
+CMD ["node_modules/.bin/prisma", "migrate", "deploy"]
 
 # ---------------------------------------------------------------------------
 # Runtime
