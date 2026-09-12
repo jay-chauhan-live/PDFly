@@ -17,7 +17,17 @@ import type { Env } from '../config/env.schema.js';
 @Injectable()
 export class StorageService {
   private readonly logger = new Logger(StorageService.name);
+  /** Talks to storage directly: uploads and deletes. */
   private readonly client: S3Client;
+  /**
+   * Signs download URLs only, and never connects. When storage sits behind a
+   * reverse proxy — MinIO reached internally at `http://minio:9000` but served
+   * to browsers at `https://host/pdfly-files` — a URL must be *signed* for the
+   * public host or the proxy's MinIO rejects the SigV4 signature (it validates
+   * against the Host header it receives). Presigning is offline crypto, so this
+   * client resolving the public name is never required.
+   */
+  private readonly presignClient: S3Client;
   private readonly bucket: string;
   private readonly urlTtl: number;
 
@@ -25,15 +35,22 @@ export class StorageService {
     this.bucket = config.get('S3_BUCKET', { infer: true });
     this.urlTtl = config.get('DOWNLOAD_URL_TTL_SECONDS', { infer: true });
 
-    this.client = new S3Client({
+    const common = {
       region: config.get('S3_REGION', { infer: true }),
-      endpoint: config.get('S3_ENDPOINT', { infer: true }),
       forcePathStyle: config.get('S3_FORCE_PATH_STYLE', { infer: true }),
       credentials: {
         accessKeyId: config.get('S3_ACCESS_KEY_ID', { infer: true }),
         secretAccessKey: config.get('S3_SECRET_ACCESS_KEY', { infer: true }),
       },
-    });
+    };
+
+    const endpoint = config.get('S3_ENDPOINT', { infer: true });
+    // Falls back to the internal endpoint, so single-endpoint deployments
+    // (dev, direct-to-R2) behave exactly as before.
+    const publicEndpoint = config.get('S3_PUBLIC_ENDPOINT', { infer: true }) || endpoint;
+
+    this.client = new S3Client({ ...common, endpoint });
+    this.presignClient = new S3Client({ ...common, endpoint: publicEndpoint });
   }
 
   /** Layout from PLAN §3.5. */
@@ -70,7 +87,7 @@ export class StorageService {
    */
   signedDownloadUrl(key: string, filename?: string): Promise<string> {
     return getSignedUrl(
-      this.client,
+      this.presignClient,
       new GetObjectCommand({
         Bucket: this.bucket,
         Key: key,

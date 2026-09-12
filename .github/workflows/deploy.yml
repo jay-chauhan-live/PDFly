@@ -7,25 +7,13 @@ on:
     workflows: ['CI']
     branches: [main]
     types: [completed]
-  # For redeploying the current main without pushing an empty commit.
   workflow_dispatch:
-    inputs:
-      skip_health_check:
-        description: 'Deploy even if the health check fails (not recommended)'
-        type: boolean
-        default: false
 
 concurrency:
-  # Never two deploys at once on the same box. `cancel-in-progress: false`
-  # because killing a deploy halfway leaves the stack in an unknown state —
-  # the second one waits its turn instead.
+  # Never two deploys at once on the box. Not cancel-in-progress: killing a
+  # deploy halfway leaves the stack in an unknown state — the next one waits.
   group: deploy-production
   cancel-in-progress: false
-
-env:
-  DEPLOY_DIR: /srv/pdfly
-  DEPLOY_ENVIRONMENT: production
-  COMPOSE_FILES: -f docker-compose.yml -f docker-compose.prod.yml
 
 jobs:
   deploy:
@@ -35,14 +23,20 @@ jobs:
       github.event.workflow_run.conclusion == 'success'
 
     runs-on: [self-hosted, primary-server]
+    # Grants the job the production environment's secrets.
+    environment: production
     timeout-minutes: 30
+
+    env:
+      DEPLOY_DIR: /home/mtpl/docker/PDFly
+      COMPOSE: docker compose -f docker-compose.prod.yml
 
     steps:
       - name: Check out
         uses: actions/checkout@v5
         with:
-          # workflow_run gives the SHA of the run that triggered this, not the
-          # branch tip, so the deploy matches the code CI actually tested.
+          # workflow_run reports the SHA it was triggered by, not the branch
+          # tip, so the deploy matches the code CI actually tested.
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Record the start time
@@ -52,211 +46,190 @@ jobs:
       - name: Notify Slack — started
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: node scripts/slack-notify.mjs started
+        run: node scripts/slack-notify.mjs started || true
 
-      - name: Verify the deploy directory and its secrets
+      - name: Sync the working tree to the deploy directory
         run: |
           set -euo pipefail
-
-          if [[ ! -d "$DEPLOY_DIR" ]]; then
-            echo "::error::$DEPLOY_DIR does not exist. See docs/DEPLOYMENT.md."
-            exit 1
-          fi
-
-          if [[ ! -f "$DEPLOY_DIR/.env" ]]; then
-            echo "::error::$DEPLOY_DIR/.env is missing. The stack will not start without it."
-            exit 1
-          fi
-
-          # Secrets live on the server, not in the repository and not in
-          # GitHub. This checks they are there without printing any of them.
-          missing=()
-          for key in DATABASE_URL REDIS_URL S3_ENDPOINT S3_BUCKET S3_ACCESS_KEY_ID \
-                     S3_SECRET_ACCESS_KEY JWT_ACCESS_SECRET ENCRYPTION_KEY \
-                     WEBHOOK_SIGNING_SECRET; do
-            grep -qE "^${key}=." "$DEPLOY_DIR/.env" || missing+=("$key")
-          done
-
-          if [[ ${#missing[@]} -gt 0 ]]; then
-            echo "::error::$DEPLOY_DIR/.env is missing: ${missing[*]}"
-            exit 1
-          fi
-
-          echo "deploy directory and secrets look right"
+          mkdir -p "$DEPLOY_DIR"
+          # --delete removes files that left the repo so nothing stale lingers.
+          # The server keeps its own .env and RELEASE_SHA; never overwrite them.
+          rsync -a --delete \
+            --exclude '.git' --exclude 'node_modules' --exclude '.next' \
+            --exclude 'dist' --exclude '.env' --exclude 'RELEASE_SHA' \
+            ./ "$DEPLOY_DIR/"
 
       - name: Capture the current release, for rollback
         id: previous
         run: |
-          set -euo pipefail
           cd "$DEPLOY_DIR"
-
           if [[ -f RELEASE_SHA ]]; then
             echo "sha=$(cat RELEASE_SHA)" >> "$GITHUB_OUTPUT"
-            echo "previous release: $(cat RELEASE_SHA)"
           else
             echo "sha=" >> "$GITHUB_OUTPUT"
-            echo "no previous release recorded — this looks like the first deploy"
           fi
 
-      - name: Sync the working tree to the server
+      - name: Write .env from the production environment secrets
+        env:
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          JWT_ACCESS_SECRET: ${{ secrets.JWT_ACCESS_SECRET }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          WEBHOOK_SIGNING_SECRET: ${{ secrets.WEBHOOK_SIGNING_SECRET }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          SEED_ADMIN_PASSWORD: ${{ secrets.SEED_ADMIN_PASSWORD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          # Non-secret config, overridable by environment variables.
+          DOMAIN: ${{ vars.PDFLY_DOMAIN || 'pdfly.morphsync.in' }}
+          SCHEME: ${{ vars.PDFLY_SCHEME || 'http' }}
+          COOKIE_SECURE: ${{ vars.PDFLY_COOKIE_SECURE || 'false' }}
+          SEED_ADMIN_EMAIL: ${{ vars.SEED_ADMIN_EMAIL || 'admin@morphsync.in' }}
+          SEED_ADMIN_NAME: ${{ vars.SEED_ADMIN_NAME || 'Administrator' }}
+          SEED_ADMIN_ORG: ${{ vars.SEED_ADMIN_ORG || 'Morphsync' }}
         run: |
           set -euo pipefail
 
-          # rsync rather than a bare copy: --delete removes files that left the
-          # repo, so a deleted migration or config does not linger. The excludes
-          # keep build output and the server's own .env out of the way.
-          rsync -a --delete \
-            --exclude '.git' \
-            --exclude 'node_modules' \
-            --exclude '.next' \
-            --exclude 'dist' \
-            --exclude '.env' \
-            --exclude 'RELEASE_SHA' \
-            ./ "$DEPLOY_DIR/"
+          # Percent-encode the DB credentials so a password with URL-special
+          # characters cannot corrupt the connection string.
+          enc() { python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "$1"; }
+          PGUSER_ENC="$(enc "$POSTGRES_USER")"
+          PGPASS_ENC="$(enc "$POSTGRES_PASSWORD")"
 
-          echo "synced $(git rev-parse --short HEAD) to $DEPLOY_DIR"
+          umask 077
+          cat > "$DEPLOY_DIR/.env" <<EOF
+          NODE_ENV=production
+          LOG_LEVEL=info
 
-      - name: Build the images
+          API_PORT=8101
+          WEB_PORT=8100
+          MINIO_PORT=9100
+          API_URL=${SCHEME}://${DOMAIN}
+          WEB_URL=${SCHEME}://${DOMAIN}
+          NEXT_PUBLIC_API_URL=${SCHEME}://${DOMAIN}
+          COOKIE_SECURE=${COOKIE_SECURE}
+
+          DATABASE_URL=postgresql://${PGUSER_ENC}:${PGPASS_ENC}@host.docker.internal:5432/${POSTGRES_DB}?schema=public
+
+          S3_ENDPOINT=http://minio:9000
+          S3_PUBLIC_ENDPOINT=${SCHEME}://${DOMAIN}
+          S3_REGION=auto
+          S3_BUCKET=pdfly-files
+          S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}
+          S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}
+          S3_FORCE_PATH_STYLE=true
+
+          QUEUE_CONCURRENCY=2
+          WEBHOOK_SIGNING_SECRET=${WEBHOOK_SIGNING_SECRET}
+          WEBHOOK_ALLOW_PRIVATE=false
+
+          JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}
+          ENCRYPTION_KEY=${ENCRYPTION_KEY}
+
+          SMTP_HOST=${SMTP_HOST}
+          SMTP_PORT=${SMTP_PORT}
+          SMTP_USERNAME=${SMTP_USERNAME}
+          SMTP_PASSWORD=${SMTP_PASSWORD}
+          SMTP_FROM=${SMTP_FROM}
+
+          SEED_ADMIN_EMAIL=${SEED_ADMIN_EMAIL}
+          SEED_ADMIN_NAME=${SEED_ADMIN_NAME}
+          SEED_ADMIN_ORG=${SEED_ADMIN_ORG}
+          SEED_ADMIN_PASSWORD=${SEED_ADMIN_PASSWORD}
+          EOF
+          echo "wrote $DEPLOY_DIR/.env ($(wc -l < "$DEPLOY_DIR/.env") lines)"
+
+      - name: Build images
         run: |
           set -euo pipefail
           cd "$DEPLOY_DIR"
-          set -a; . ./.env; set +a
-
-          # Built here on the box that runs them. No registry, no pull.
-          docker compose $COMPOSE_FILES build --pull
+          # --profile tools so the migrate image is built alongside the rest.
+          $COMPOSE --profile tools build
 
       - name: Apply database migrations
         run: |
           set -euo pipefail
           cd "$DEPLOY_DIR"
-          set -a; . ./.env; set +a
-
-          # Postgres and Redis first: migrations need the database, and the app
-          # containers would crash-loop without it.
-          docker compose $COMPOSE_FILES up -d postgres redis minio
-
-          # `up -d --wait` respects the healthchecks in docker-compose.yml.
-          docker compose $COMPOSE_FILES up -d --wait postgres redis
-
-          # migrate deploy applies pending migrations and never generates or
-          # resets. It is the only Prisma command safe to run unattended.
-          #
-          # Run from the `api-migrate` image, which keeps the Prisma CLI. The
-          # runtime image prunes devDependencies, so the CLI is not in it.
-          docker compose $COMPOSE_FILES --profile tools run --rm api-migrate
+          # Bring internal storage up first (the api will need it), then migrate
+          # the host database. migrate deploy only applies; it never resets.
+          $COMPOSE up -d --wait redis minio
+          $COMPOSE --profile tools run --rm api-migrate
 
       - name: Start the stack
         run: |
           set -euo pipefail
           cd "$DEPLOY_DIR"
-          set -a; . ./.env; set +a
-
-          docker compose $COMPOSE_FILES up -d --remove-orphans
+          $COMPOSE up -d --remove-orphans
 
       - name: Ensure the first administrator exists
-        env:
-          SEED_ADMIN_EMAIL: ${{ vars.SEED_ADMIN_EMAIL }}
-          SEED_ADMIN_NAME: ${{ vars.SEED_ADMIN_NAME }}
-          SEED_ADMIN_ORG: ${{ vars.SEED_ADMIN_ORG }}
-          SEED_ADMIN_PASSWORD: ${{ secrets.SEED_ADMIN_PASSWORD }}
         run: |
           set -euo pipefail
           cd "$DEPLOY_DIR"
-          set -a; . ./.env; set +a
-
-          # Idempotent: an existing admin is left exactly as it is, password
-          # included. Safe to run on every deploy.
-          # The compiled seeder, not the TypeScript source: the production
-          # image has no TypeScript loader — tsx is a devDependency and is
-          # pruned out of it.
-          docker compose $COMPOSE_FILES run --rm --no-deps \
-            -e SEED_ADMIN_EMAIL -e SEED_ADMIN_NAME -e SEED_ADMIN_ORG -e SEED_ADMIN_PASSWORD \
-            api node apps/api/dist/cli/seed-admin.js
+          # Idempotent: an existing admin is left untouched, password included.
+          $COMPOSE run --rm --no-deps api node apps/api/dist/cli/seed-admin.js
 
       - name: Health check
-        id: health
         run: |
           set -euo pipefail
-          cd "$DEPLOY_DIR"
-
-          # The api reports its own dependencies — Postgres, Redis, the
-          # renderer and qpdf. A 200 here means the whole stack answered, not
-          # just that a container started.
           for attempt in $(seq 1 30); do
-            if curl -fsS --max-time 5 http://localhost:3001/health > /tmp/health.json 2>/dev/null; then
-              echo "healthy after ${attempt} attempt(s)"
-              cat /tmp/health.json
-              exit 0
+            if curl -fsS --max-time 5 http://127.0.0.1:8101/health > /tmp/pdfly-health.json 2>/dev/null; then
+              echo "healthy after ${attempt} attempt(s)"; cat /tmp/pdfly-health.json; exit 0
             fi
             sleep 2
           done
-
           echo "::error::the api did not become healthy within 60s"
-          curl -sS --max-time 5 http://localhost:3001/health || true
-          docker compose $COMPOSE_FILES ps
-          docker compose $COMPOSE_FILES logs --tail 80 api renderer
+          cd "$DEPLOY_DIR"
+          curl -sS --max-time 5 http://127.0.0.1:8101/health || true
+          $COMPOSE ps
+          $COMPOSE logs --tail 100 api renderer
           exit 1
 
       - name: Record this release
-        run: |
-          cd "$DEPLOY_DIR"
-          echo "${{ github.event.workflow_run.head_sha || github.sha }}" > RELEASE_SHA
+        run: echo "${{ github.event.workflow_run.head_sha || github.sha }}" > "$DEPLOY_DIR/RELEASE_SHA"
 
       - name: Remove images nothing is using
-        # Keeps the disk from filling with every image ever built here. Only
-        # dangling ones, so a tagged previous release survives for rollback.
-        run: docker image prune -f --filter 'dangling=true'
+        run: docker image prune -f --filter 'dangling=true' || true
 
-      # -----------------------------------------------------------------
-      # Failure handling
       # -----------------------------------------------------------------
       - name: Roll back
         if: failure() && steps.previous.outputs.sha != ''
         run: |
           set -euo pipefail
           cd "$DEPLOY_DIR"
-          set -a; . ./.env; set +a
-
           echo "::warning::deploy failed; rolling back to ${{ steps.previous.outputs.sha }}"
-
-          # Deliberately not rolling the database back. A migration that has
-          # applied may already have data written against it, and undoing it
-          # automatically is how you lose that data. Migrations here are
-          # expected to be backwards compatible with one release; a rollback
-          # that genuinely needs a schema change is a human decision.
+          # The database is deliberately not rolled back — reversing a migration
+          # that already has data written against it is how that data is lost.
           git -C "$GITHUB_WORKSPACE" checkout --force "${{ steps.previous.outputs.sha }}"
           rsync -a --delete \
             --exclude '.git' --exclude 'node_modules' --exclude '.next' \
             --exclude 'dist' --exclude '.env' --exclude 'RELEASE_SHA' \
             "$GITHUB_WORKSPACE/" "$DEPLOY_DIR/"
-
-          docker compose $COMPOSE_FILES build
-          docker compose $COMPOSE_FILES up -d --remove-orphans
-
-          echo "rolled back to ${{ steps.previous.outputs.sha }}"
+          $COMPOSE --profile tools build
+          $COMPOSE up -d --remove-orphans
 
       - name: Notify Slack — rolled back
         if: failure() && steps.previous.outputs.sha != ''
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: |
-          node scripts/slack-notify.mjs rolled-back \
-            "Deploy failed and the previous release (${{ steps.previous.outputs.sha }}) was restored. The database was NOT rolled back."
+        run: node scripts/slack-notify.mjs rolled-back "Deploy failed; previous release ${{ steps.previous.outputs.sha }} restored. Database not rolled back." || true
 
       - name: Notify Slack — failed
         if: failure() && steps.previous.outputs.sha == ''
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: |
-          node scripts/slack-notify.mjs failed \
-            "No previous release to roll back to. The stack may be partly up — check the run."
+        run: node scripts/slack-notify.mjs failed "No previous release to roll back to; the stack may be partly up." || true
 
       - name: Notify Slack — succeeded
         if: success()
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          DEPLOY_HEALTH_URL: ${{ vars.DEPLOY_HEALTH_URL }}
+          DEPLOY_HEALTH_URL: ${{ vars.PDFLY_DOMAIN && format('http://{0}/health', vars.PDFLY_DOMAIN) || 'http://pdfly.morphsync.in/health' }}
         run: |
           elapsed=$(( $(date +%s) - ${{ steps.start.outputs.at }} ))
           export DEPLOY_DURATION="$(( elapsed / 60 ))m $(( elapsed % 60 ))s"
-          node scripts/slack-notify.mjs succeeded
+          node scripts/slack-notify.mjs succeeded || true

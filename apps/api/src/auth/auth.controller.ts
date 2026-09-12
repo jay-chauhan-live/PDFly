@@ -24,9 +24,12 @@ export class AuthController {
 
     this.cookieOptions = {
       httpOnly: true,
-      // PLAN §5 calls for Secure. Kept off in development only, because the
-      // local dashboard is served over plain http.
-      secure: !isDev,
+      // PLAN §5 calls for Secure, and it stays on in production. A Secure
+      // cookie is dropped by the browser over plain http, though, so a
+      // deployment still bootstrapping behind http (no cert yet) sets
+      // COOKIE_SECURE=false until TLS is in front — otherwise login silently
+      // never persists. Development is always http, so it is off there too.
+      secure: config.get('COOKIE_SECURE', { infer: true }) && !isDev,
       sameSite: 'lax',
       // Scoped to the auth routes: no other endpoint has any use for it.
       path: '/v1/auth',

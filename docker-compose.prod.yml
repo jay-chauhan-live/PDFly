@@ -1,12 +1,21 @@
-# Production topology, and the container hardening PLAN §11 asks for.
+# Production stack for primary-server. Standalone — it does NOT merge the dev
+# docker-compose.yml, whose host-published ports would collide on this shared
+# box. Run it on its own:
 #
-# Run with:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.prod.yml up -d
 #
-# The shape that matters here is the network split. `renderer` sits on an
-# isolated network with no route to Postgres, Redis or MinIO, so even a full
-# compromise of the browser process reaches no data. Its only way out is the
-# egress proxy, which resolves DNS itself and refuses private destinations at
-# connect time.
+# Topology on this host:
+#   - Postgres is the host's shared instance, reached over host-gateway. No
+#     database container here.
+#   - Redis, MinIO and the renderer are internal containers, unreachable from
+#     outside the compose network.
+#   - api and web bind to 127.0.0.1 only; the host nginx terminates TLS for
+#     pdfly.thetechpacks.com and proxies to them (and to MinIO for downloads).
+#   - The renderer sits on an internal network with no gateway. Its only route
+#     out is the egress proxy, which resolves DNS itself and refuses private
+#     destinations at connect time (PLAN §11).
+#
+# Values come from the .env in this directory (compose loads it automatically).
 
 name: pdfly
 
@@ -17,35 +26,29 @@ services:
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
     depends_on:
-      postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    # The host's Postgres listens on the docker bridge; this name resolves to it.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    env_file: [.env]
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-pdfly}:${POSTGRES_PASSWORD:-pdfly}@postgres:5432/${POSTGRES_DB:-pdfly}?schema=public
       REDIS_URL: redis://redis:6379
       RENDERER_URL: http://renderer:3002
-      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
-      S3_BUCKET: ${S3_BUCKET:-pdfly}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-pdfly}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-pdfly-dev-secret}
+      # Signing and uploads both go through the public endpoint so the signed
+      # URLs a browser receives actually resolve (path-style, bucket in path).
       S3_FORCE_PATH_STYLE: 'true'
-      WEB_URL: ${WEB_URL:-http://localhost:3000}
-      API_URL: ${API_URL:-http://localhost:3001}
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY}
-      WEBHOOK_SIGNING_SECRET: ${WEBHOOK_SIGNING_SECRET:?set WEBHOOK_SIGNING_SECRET}
-      # Private webhook destinations are an SSRF hole in production.
       WEBHOOK_ALLOW_PRIVATE: 'false'
+    # Loopback only: nginx on the host is the sole way in.
     ports:
-      - '${API_PORT:-3001}:3001'
+      - '127.0.0.1:${API_PORT:-8101}:3001'
     networks: [backend, render]
-    # Nothing writes to the image at runtime; the only mutable path is the
-    # scratch directory qpdf needs, which is a tmpfs rather than a disk.
+    # Nothing writes to the image at runtime; qpdf's scratch dir is a tmpfs.
     read_only: true
     tmpfs:
       - /tmp:size=512m,mode=1777
-    security_opt:
-      - no-new-privileges:true
+    security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     deploy:
       resources:
@@ -59,115 +62,139 @@ services:
     environment:
       NODE_ENV: production
       POOL_SIZE: ${POOL_SIZE:-2}
-      # The renderer's only way out. Without this the isolated network would
-      # simply sever external assets rather than filter them.
       EGRESS_PROXY: http://egress-proxy:3128
-    # Deliberately no `ports`: the renderer is reachable from the api over the
-    # internal network and from nowhere else.
     networks: [render]
     depends_on: [egress-proxy]
     read_only: true
     tmpfs:
       - /tmp:size=1g,mode=1777
-      # Chromium's default /dev/shm is 64 MB in a container, which it will
-      # exhaust and then crash in a way that looks like a random hang.
-      # --disable-dev-shm-usage covers it too; both is cheap.
+      # Chromium's default /dev/shm is 64 MB in a container; it exhausts it and
+      # crashes in a way that looks like a random hang.
       - /dev/shm:size=1g
-    security_opt:
-      - no-new-privileges:true
+    security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
-    # Chromium's sandbox builds its own user and PID namespaces, which needs
-    # unshare/clone syscalls that Docker's default seccomp profile denies.
-    # PLAN §11 is explicit that the answer is to grant what the sandbox needs
-    # rather than pass --no-sandbox, since this is the process executing
-    # attacker-controlled markup: an unsandboxed renderer turns one browser
-    # bug into full container access. A seccomp profile allowing only
-    # clone/unshare/setns would be tighter than the whole capability and is
-    # the obvious next tightening.
+    # Chromium's sandbox builds its own namespaces, which needs unshare/clone
+    # syscalls the default seccomp profile denies. PLAN §11: grant what the
+    # sandbox needs rather than pass --no-sandbox, since this is the process
+    # running attacker-controlled markup.
     cap_add: [SYS_ADMIN]
     deploy:
       resources:
         limits: { memory: 2g, cpus: '2' }
 
-  # Runs migrations and exits. A separate image because the Prisma CLI is a
-  # devDependency the runtime image prunes away — and because a tool that can
-  # alter the schema has no business inside the process serving traffic.
-  #
-  # `profiles` keeps it out of `docker compose up`; the deploy invokes it by
-  # name with `run --rm`.
+  # Runs migrations and exits. A separate image target because the Prisma CLI
+  # is a devDependency the runtime image prunes, and a schema-altering tool has
+  # no business inside the process serving traffic. `profiles` keeps it out of
+  # `up`; the deploy invokes it with `run --rm`.
   api-migrate:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
       target: migrate
     profiles: [tools]
-    depends_on:
-      postgres: { condition: service_healthy }
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-pdfly}:${POSTGRES_PASSWORD:-pdfly}@postgres:5432/${POSTGRES_DB:-pdfly}?schema=public
-    networks: [backend]
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    env_file: [.env]
     restart: 'no'
 
-  # Chromium's only route off the isolated network (PLAN §11). It resolves DNS
-  # itself and refuses private destinations at connect time, which is the DNS
-  # rebinding gap an in-process check cannot close.
   egress-proxy:
     image: ubuntu/squid:latest
     restart: unless-stopped
     volumes:
       - ./docker/squid-egress.conf:/etc/squid/squid.conf:ro
-    # Both networks: reachable from the renderer, and able to reach outward.
-    # This is the one bridge, and it is a filtering one.
     networks: [render, egress]
-    security_opt:
-      - no-new-privileges:true
+    security_opt: [no-new-privileges:true]
     deploy:
       resources:
         limits: { memory: 256m }
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    # BullMQ needs noeviction: a maxmemory-evicting Redis silently drops job
+    # data. Append-only so a restart does not lose the queue.
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    # No published port: the host already runs a Redis on 6379, and this one is
+    # for PDFly alone, reachable only inside the compose network.
+    networks: [backend]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    security_opt: [no-new-privileges:true]
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ['server', '/data']
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY}
+    # Published on loopback so the host nginx can proxy /pdfly-files/ to it;
+    # not otherwise reachable.
+    ports:
+      - '127.0.0.1:${MINIO_PORT:-9100}:9000'
+    networks: [backend]
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt: [no-new-privileges:true]
+
+  # One-shot: creates the bucket so the api never bootstraps storage itself.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio: { condition: service_healthy }
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 \"$${S3_ACCESS_KEY_ID}\" \"$${S3_SECRET_ACCESS_KEY}\" &&
+      mc mb --ignore-existing \"local/$${S3_BUCKET}\" &&
+      echo 'bucket ready: '\"$${S3_BUCKET}\"
+      "
+    environment:
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_BUCKET: ${S3_BUCKET:-pdfly-files}
+    networks: [backend]
+    restart: 'no'
 
   web:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+        # Inlined into the bundle at build time; same origin as the site.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
     restart: unless-stopped
     depends_on: [api]
     ports:
-      - '3000:3000'
+      - '127.0.0.1:${WEB_PORT:-8100}:3000'
     networks: [frontend]
     read_only: true
     tmpfs:
       - /tmp:size=128m,mode=1777
-    security_opt:
-      - no-new-privileges:true
+    security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     deploy:
       resources:
         limits: { memory: 512m }
 
-  # The backing services keep their host ports in development. In a real
-  # deployment they would lose them and live only on `backend`.
-  postgres:
-    networks: [backend]
-
-  redis:
-    networks: [backend]
-
-  minio:
-    networks: [backend]
-
-  minio-init:
-    networks: [backend]
-
 networks:
   frontend:
   backend:
-  # `internal: true` is the control: no gateway, so nothing on this network
-  # reaches the host, the internet, or the database on its own. The renderer
-  # lives here and has exactly two peers — the api, which calls in, and the
-  # egress proxy, which is the only way out and filters what goes through it.
+  # internal: no gateway. The renderer lives here with two peers only — the
+  # api, which calls in, and the egress proxy, the one filtered way out.
   render:
     internal: true
-  # Where the egress proxy has its outward route. Nothing else joins it.
   egress:
+
+volumes:
+  redis-data:
+  minio-data:

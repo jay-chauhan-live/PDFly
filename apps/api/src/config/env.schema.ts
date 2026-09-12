@@ -26,6 +26,13 @@ export const envSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
+  /**
+   * The origin browsers use to reach storage, when it differs from the one the
+   * api uploads through — MinIO behind a reverse proxy. Download URLs are
+   * signed for this; uploads still use S3_ENDPOINT. Unset means they are the
+   * same, which is the case for dev and for direct-to-R2.
+   */
+  S3_PUBLIC_ENDPOINT: z.string().optional(),
 
   // Phase 1 renderer wiring.
   RENDERER_URL: z.url().default('http://localhost:3002'),
@@ -79,6 +86,17 @@ export const envSchema = z.object({
   WEBHOOK_ALLOW_PRIVATE: z
     .enum(['true', 'false'])
     .default('false')
+    .transform((v) => v === 'true'),
+
+  /**
+   * The refresh cookie's Secure flag. On in production, but a deployment
+   * still on plain http (no certificate yet) must set this false, or the
+   * browser drops the cookie and login never persists. Flip it to true the
+   * moment TLS is in front.
+   */
+  COOKIE_SECURE: z
+    .enum(['true', 'false'])
+    .default('true')
     .transform((v) => v === 'true'),
 
   JWT_ACCESS_SECRET: z.string().min(16, 'JWT_ACCESS_SECRET must be at least 16 characters'),
