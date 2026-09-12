@@ -47,7 +47,14 @@ services:
     # Loopback only: nginx on the host is the sole way in.
     ports:
       - '127.0.0.1:${API_PORT:-8101}:3001'
-    networks: [backend, render]
+    # backend + render as before; automation is n8n's external network, joined
+    # so workflows there reach the api directly at http://pdfly-api:3001 over
+    # the docker bridge, without going out to the public edge and back.
+    networks:
+      backend: {}
+      render: {}
+      automation:
+        aliases: [pdfly-api]
     # Nothing writes to the image at runtime; qpdf's scratch dir is a tmpfs.
     read_only: true
     tmpfs:
@@ -199,6 +206,12 @@ networks:
   render:
     internal: true
   egress:
+  # n8n's network, created by that stack. Declared external so this compose
+  # attaches to it rather than owning it; the api joins it (see above) so
+  # automation workflows can call the API over the internal bridge.
+  automation:
+    external: true
+    name: automation-net
 
 volumes:
   redis-data:
