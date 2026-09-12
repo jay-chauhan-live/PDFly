@@ -34,6 +34,10 @@ services:
     env_file: [.env]
     environment:
       NODE_ENV: production
+      # API_PORT in .env is the host-published port (see the mapping below);
+      # inside the container the app always listens on the fixed port the
+      # published mapping and EXPOSE target. This override wins over env_file.
+      API_PORT: 3001
       REDIS_URL: redis://redis:6379
       RENDERER_URL: http://renderer:3002
       # Signing and uploads both go through the public endpoint so the signed
