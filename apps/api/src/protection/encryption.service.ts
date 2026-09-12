@@ -122,11 +122,19 @@ export class EncryptionService {
     const ownerPassword = protection.ownerPassword ?? randomBytes(32).toString('base64url');
 
     const permissions = protection.permissions ?? {};
+
+    // qpdf's traditional --encrypt syntax: user password, owner password and
+    // key length are positional, in that order, then the restriction flags and
+    // a closing --. The named-flag form (--user-password=, --owner-password=,
+    // --bits=) only exists in qpdf >= 11.7; Debian bookworm ships 11.3, so the
+    // positional form is used for portability. Newer qpdf still accepts it. An
+    // empty user password is a legitimate value (restrict-only, no open
+    // password) and survives as an empty token in the @- argument file.
     const args = [
       '--encrypt',
-      `--user-password=${userPassword}`,
-      `--owner-password=${ownerPassword}`,
-      '--bits=256',
+      userPassword,
+      ownerPassword,
+      '256',
     ];
 
     // Printing is a three-state permission, not a boolean: a document can
