@@ -1,6 +1,11 @@
 # The api holds the database credentials and the encryption key. It renders
 # nothing itself — that is the renderer's job, in its own container.
-FROM node:24-bookworm-slim AS base
+#
+# trixie (Debian 13), not bookworm: bookworm ships qpdf 11.3, which predates
+# the named-flag --encrypt syntax the encryption service relies on to pass
+# passwords safely (see apps/api/src/protection/encryption.service.ts). trixie
+# ships qpdf 12.x, which supports it.
+FROM node:24-trixie-slim AS base
 
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH
