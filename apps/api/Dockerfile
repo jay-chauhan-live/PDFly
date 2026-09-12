@@ -18,14 +18,21 @@ RUN apt-get update \
 FROM base AS build
 WORKDIR /repo
 
+# Every workspace manifest, so pnpm reconstructs the full dependency graph and
+# links the workspace's own packages (net-guard) into their consumers exactly
+# as it does in development. A partial set silently skips those links.
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+COPY apps/renderer/package.json apps/renderer/
 COPY packages/net-guard/package.json packages/net-guard/
 
-RUN pnpm install --frozen-lockfile --filter @pdfly/api... --filter @pdfly/net-guard
-
+# Source before install: a COPY over the workspace tree after install would
+# clobber the symlinks pnpm creates for workspace packages (net-guard).
 COPY packages/net-guard packages/net-guard
 COPY apps/api apps/api
+
+RUN pnpm install --frozen-lockfile --filter @pdfly/api...
 
 # The Prisma client is generated, not vendored, and the build needs its types.
 #
@@ -38,13 +45,20 @@ RUN DATABASE_URL="postgresql://build:build@localhost:5432/build?schema=public" \
  && pnpm --filter @pdfly/net-guard build \
  && pnpm --filter @pdfly/api build
 
+# A self-contained deploy of just the api: real, flat node_modules with the
+# workspace's net-guard folded in. pnpm's default node_modules is a symlink
+# farm into a shared store that does not survive a copy into another image;
+# `pnpm deploy` resolves that into one portable directory. --legacy because
+# the workspace does not use injected dependencies.
+RUN pnpm --filter=@pdfly/api --legacy deploy --prod /prod/api
+
 # ---------------------------------------------------------------------------
 # Migrations
 # ---------------------------------------------------------------------------
-# Its own stage because the Prisma CLI is a devDependency and the runtime
-# image below prunes those away. Shipping the CLI into the running service
-# would mean carrying a schema-altering tool in the process exposed to the
-# internet — this keeps it in an image that only exists during a deploy.
+# Its own stage because the Prisma CLI is a devDependency the deployed runtime
+# does not carry. Shipping the CLI into the running service would mean a
+# schema-altering tool in the process exposed to the internet; this keeps it in
+# an image that only exists during a deploy.
 FROM build AS migrate
 WORKDIR /repo/apps/api
 CMD ["pnpm", "exec", "prisma", "migrate", "deploy"]
@@ -52,27 +66,16 @@ CMD ["pnpm", "exec", "prisma", "migrate", "deploy"]
 # ---------------------------------------------------------------------------
 # Runtime
 # ---------------------------------------------------------------------------
-FROM build AS pruned
-# pnpm refuses to purge a modules directory without a TTY unless it is told
-# it is running unattended.
-RUN CI=true pnpm prune --prod
-
 FROM base AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production
 
-COPY --from=pruned --chown=node:node /repo/node_modules ./node_modules
-COPY --from=pruned --chown=node:node /repo/packages/net-guard ./packages/net-guard
-COPY --from=pruned --chown=node:node /repo/apps/api/node_modules ./apps/api/node_modules
-COPY --from=pruned --chown=node:node /repo/apps/api/dist ./apps/api/dist
-COPY --from=pruned --chown=node:node /repo/apps/api/package.json ./apps/api/
-# The schema travels with the image: the generated client reads it at runtime,
-# and `dist/cli/seed-admin.js` needs the client to work.
-COPY --from=pruned --chown=node:node /repo/apps/api/prisma ./apps/api/prisma
+# The whole app, self-contained: dist, prisma/, package.json and node_modules.
+COPY --from=build --chown=node:node /prod/api ./
 
 USER node
 
 EXPOSE 3001
 
-CMD ["node", "apps/api/dist/main.js"]
+CMD ["node", "dist/main.js"]

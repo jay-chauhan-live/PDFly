@@ -20,20 +20,28 @@ WORKDIR /repo
 
 # The lockfile and manifests first, so a source-only change does not reinstall
 # the world.
+# Every workspace manifest, so pnpm links the workspace's own packages
+# (net-guard) into their consumers exactly as in development. A partial set
+# silently skips those links.
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
 COPY apps/renderer/package.json apps/renderer/
 COPY packages/net-guard/package.json packages/net-guard/
 
-RUN pnpm install --frozen-lockfile --filter @pdfly/renderer... --filter @pdfly/net-guard
-
+# Source before install: a COPY over the workspace tree after install would
+# clobber the symlinks pnpm creates for workspace packages (net-guard).
 COPY packages/net-guard packages/net-guard
 COPY apps/renderer apps/renderer
 
+RUN pnpm install --frozen-lockfile --filter @pdfly/renderer...
+
 RUN pnpm --filter @pdfly/net-guard build && pnpm --filter @pdfly/renderer build
 
-# Drops devDependencies from the tree that gets copied forward. CI=true
-# because pnpm will not purge a modules directory without a TTY otherwise.
-RUN CI=true pnpm prune --prod
+# A self-contained deploy: real, flat node_modules with net-guard folded in.
+# pnpm's default symlink-farm node_modules does not survive a copy into the
+# runtime image; `pnpm deploy` resolves it into one portable directory.
+RUN pnpm --filter=@pdfly/renderer --legacy deploy --prod /prod/renderer
 
 # ---------------------------------------------------------------------------
 # Runtime
@@ -44,12 +52,8 @@ WORKDIR /app
 # `pwuser` ships with the Playwright image and is not root. Chromium's own
 # sandbox still works — PLAN §11 is explicit that `--no-sandbox` is not the
 # answer, so the container is given the privileges the sandbox needs instead
-# (see the seccomp profile and cap_add in docker-compose.prod.yml).
-COPY --from=build --chown=pwuser:pwuser /repo/node_modules ./node_modules
-COPY --from=build --chown=pwuser:pwuser /repo/packages/net-guard ./packages/net-guard
-COPY --from=build --chown=pwuser:pwuser /repo/apps/renderer/node_modules ./apps/renderer/node_modules
-COPY --from=build --chown=pwuser:pwuser /repo/apps/renderer/dist ./apps/renderer/dist
-COPY --from=build --chown=pwuser:pwuser /repo/apps/renderer/package.json ./apps/renderer/
+# (see the cap_add in docker-compose.prod.yml).
+COPY --from=build --chown=pwuser:pwuser /prod/renderer ./
 
 USER pwuser
 
@@ -57,4 +61,4 @@ EXPOSE 3002
 
 # No shell form: the process is PID 1 and must receive SIGTERM directly, or
 # the pool never gets its chance to close browsers on shutdown.
-CMD ["node", "apps/renderer/dist/main.js"]
+CMD ["node", "dist/main.js"]

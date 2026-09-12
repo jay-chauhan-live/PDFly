@@ -171,7 +171,7 @@ jobs:
           set -euo pipefail
           cd "$DEPLOY_DIR"
           # Idempotent: an existing admin is left untouched, password included.
-          $COMPOSE run --rm --no-deps api node apps/api/dist/cli/seed-admin.js
+          $COMPOSE run --rm --no-deps api node dist/cli/seed-admin.js
 
       - name: Health check
         run: |

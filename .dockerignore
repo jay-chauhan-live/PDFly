@@ -1,0 +1,17 @@
+# Build context hygiene: none of this belongs in an image build, and shipping
+# it makes the context slow to transfer. .turbo alone is ~2 GB.
+.git
+.github
+.turbo
+**/.turbo
+**/node_modules
+**/dist
+**/.next
+.docker-data
+**/*.log
+**/coverage
+docs
+DEPLOYMENT.md
+# Stale incremental build state: if copied in, tsc believes the (excluded)
+# dist is already emitted and produces nothing. Exclude so every build is clean.
+**/*.tsbuildinfo
