@@ -1,4 +1,4 @@
-import { hostMatchesAllowlist, resolvesToPrivateAddress } from '@pdfly/net-guard';
+import { hostMatchesAllowlist, isPrivateAddress } from '@pdfly/net-guard';
 import type { Browser } from 'playwright';
 import { RenderError, type RenderRequest } from './contract.js';
 import type { RendererConfig } from './config.js';
@@ -29,19 +29,18 @@ function isBlockedScheme(url: string): boolean {
  *
  * This is the SSRF control (PLAN §11). The document being rendered is
  * attacker-supplied markup, and an `<img src>` is a request this server makes
- * from inside the network. The host is resolved and every answer checked
- * before the connection is allowed, so a public name pointing at
- * 169.254.169.254 is refused rather than fetched.
+ * from inside the network.
  *
- * The remaining gap is rebinding: the resolver can answer publicly here and
- * privately when Chromium connects a moment later. Closing that needs the
- * connection pinned to the address that was checked, which is the egress
- * proxy's job — see the network isolation in docker-compose.
+ * The check is deliberately DNS-free. The renderer runs on an internal docker
+ * network with no resolver of its own — a lookup here fails with EAI_AGAIN for
+ * every name, which would block all legitimate external assets. Resolving a
+ * name to check its address is instead the egress proxy's job: squid resolves
+ * at connect time and denies every private CIDR, which also closes the DNS
+ * rebinding gap an in-process lookup never could (see docker/squid-egress.conf
+ * and the network isolation in docker-compose). Here we refuse only what needs
+ * no resolver: literal private addresses and obviously-internal names.
  */
-async function assetAllowed(
-  url: string,
-  allowlist: string[],
-): Promise<{ allowed: boolean; reason?: string }> {
+function assetAllowed(url: string, allowlist: string[]): { allowed: boolean; reason?: string } {
   let hostname: string;
 
   try {
@@ -54,9 +53,13 @@ async function assetAllowed(
     return { allowed: false, reason: 'host not in the allowlist' };
   }
 
-  const verdict = await resolvesToPrivateAddress(hostname);
+  // Literal private IPs (including the 169.254.169.254 metadata endpoint) and
+  // internal-looking names are refused outright; the proxy handles the rest.
+  if (isPrivateAddress(hostname)) {
+    return { allowed: false, reason: 'private or internal host' };
+  }
 
-  return verdict.allowed ? { allowed: true } : { allowed: false, reason: verdict.reason };
+  return { allowed: true };
 }
 
 function resolveTimeout(request: RenderRequest, config: RendererConfig): number {
@@ -124,7 +127,7 @@ export async function renderPdf(
         return;
       }
 
-      const verdict = await assetAllowed(url, request.assetHostAllowlist);
+      const verdict = assetAllowed(url, request.assetHostAllowlist);
 
       if (!verdict.allowed) {
         blockedAssets.push(`${url} (${verdict.reason ?? 'refused'})`);
